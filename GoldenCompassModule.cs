@@ -33,7 +33,6 @@ namespace Celeste.Mod.GoldenCompass {
 
         public override void Unload() {
             Everest.Events.Player.OnDie -= OnPlayerDie;
-            Everest.Events.Level.OnTransitionTo -= OnTransitionTo;
             Everest.Events.Level.OnComplete -= OnLevelComplete;
         }
 
@@ -43,14 +42,6 @@ namespace Celeste.Mod.GoldenCompass {
                 string room = level.Session.Level;
                 LogAttempt(chapter, room, success: false);
             }
-        }
-
-        private void OnTransitionTo(Level level, LevelData next, Microsoft.Xna.Framework.Vector2 direction) {
-            if (next == null) return;
-            // Transitioning out of the current room = survived it
-            string chapter = GetChapterName(level.Session);
-            string room = level.Session.Level; // the room we're leaving
-            LogAttempt(chapter, room, success: true);
         }
 
         private void OnLevelComplete(Level level) {
@@ -77,16 +68,12 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         private static void LoadData() {
-            if (File.Exists(LogFilePath)) {
-                try {
-                    _data = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, List<bool>>>>(
-                        File.ReadAllText(LogFilePath));
-                } catch {
-                    _data = new Dictionary<string, Dictionary<string, List<bool>>>();
-                }
-            } else {
-                _data = new Dictionary<string, Dictionary<string, List<bool>>>();
-            }
+          try {
+              _data = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, List<bool>>>>(
+                  File.ReadAllText(LogFilePath));
+          } catch {
+              _data = new Dictionary<string, Dictionary<string, List<bool>>>();
+          }
         }
 
         private static void SaveData() {
