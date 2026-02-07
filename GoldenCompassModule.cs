@@ -27,7 +27,6 @@ namespace Celeste.Mod.GoldenCompass {
 
             // Hook into player death and room transitions
             Everest.Events.Player.OnDie += OnPlayerDie;
-            Everest.Events.Level.OnTransitionTo += OnTransitionTo;
             Everest.Events.Level.OnComplete += OnLevelComplete;
         }
 
