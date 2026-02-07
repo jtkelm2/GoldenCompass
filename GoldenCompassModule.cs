@@ -50,7 +50,12 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         private static string GetChapterName(Session session) {
-            return session.Area.SID ?? session.Area.ToString();
+        string sid = session.Area.SID ?? session.Area.ToString();
+        var mode = session.Area.Mode;
+        string suffix = mode == AreaMode.BSide ? "_B"
+                      : mode == AreaMode.CSide ? "_C"
+                      : "";
+        return sid + suffix;
         }
 
         private static void LogAttempt(string chapter, string room, bool success) {
