@@ -1,0 +1,30 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net452</TargetFramework>
+    <AssemblyName>GoldenCompass</AssemblyName>
+    <RootNamespace>Celeste.Mod.GoldenCompass</RootNamespace>
+    <LangVersion>7.3</LangVersion>
+    <CelestePrefix Condition="'$(CelestePrefix)' == '' And Exists('..\..\Celeste.exe')">..\..</CelestePrefix>
+    <CelestePrefix Condition="'$(CelestePrefix)' == ''">lib-stripped</CelestePrefix>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup>
+    <PackageReference PrivateAssets="all" ExcludeAssets="runtime" />
+    <Reference Private="false" />
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="$(CelestePrefix)\Celeste.exe" />
+    <Reference Include="$(CelestePrefix)\MMHOOK_Celeste.dll" />
+    <Reference Include="$(CelestePrefix)\FNA.dll" />
+  </ItemGroup>
+
+  <Target Name="CopyFiles" AfterTargets="Build">
+    <Copy SourceFiles="$(OutputPath)\GoldenCompass.dll" DestinationFolder="bin" />
+    <Copy SourceFiles="$(OutputPath)\GoldenCompass.pdb" DestinationFolder="bin" />
+  </Target>
+</Project>
