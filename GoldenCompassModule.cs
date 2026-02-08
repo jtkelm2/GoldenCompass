@@ -1,90 +1,168 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using Newtonsoft.Json;
+using System.Linq;
 using Monocle;
 
 namespace Celeste.Mod.GoldenCompass {
     public class GoldenCompassModule : EverestModule {
         public static GoldenCompassModule Instance;
 
-        public override Type SettingsType => null;
+        public override Type SettingsType => typeof(GoldenCompassSettings);
+        public GoldenCompassSettings ModSettings => (GoldenCompassSettings)_Settings;
 
-        private static readonly string LogDir = Path.Combine("Mods", "GoldenCompassData");
-        private static readonly string LogFilePath = Path.Combine(LogDir, "attempt-history.json");
+        public AttemptTracker Tracker { get; private set; }
+        public TimingData Timings { get; private set; }
+        public SemiomniscientAdvisor Advisor { get; private set; }
 
-        private static Dictionary<string, Dictionary<string, List<bool>>> _data;
+        public bool HasTimingsForCurrentChapter { get; private set; }
+
+        private Dictionary<string, int> _attemptsSinceRefit = new Dictionary<string, int>();
+        private string _currentSID;
+        private GoldenCompassRenderer _renderer;
 
         public GoldenCompassModule() {
             Instance = this;
         }
 
         public override void Load() {
-            if (!Directory.Exists(LogDir))
-                Directory.CreateDirectory(LogDir);
+            Tracker = new AttemptTracker();
+            Timings = new TimingData();
+            Advisor = new SemiomniscientAdvisor();
 
-            LoadData();
-
-            // Hook into player death and room transitions
             Everest.Events.Player.OnDie += OnPlayerDie;
-            Everest.Events.Level.OnComplete += OnLevelComplete;
+            Everest.Events.Level.OnComplete += OnRoomComplete;
+            Everest.Events.Level.OnEnter += OnLevelEnter;
+            Everest.Events.Level.OnExit += OnLevelExit;
         }
 
         public override void Unload() {
             Everest.Events.Player.OnDie -= OnPlayerDie;
-            Everest.Events.Level.OnComplete -= OnLevelComplete;
+            Everest.Events.Level.OnComplete -= OnRoomComplete;
+            Everest.Events.Level.OnEnter -= OnLevelEnter;
+            Everest.Events.Level.OnExit -= OnLevelExit;
         }
 
         private void OnPlayerDie(Player player) {
-            if (Engine.Scene is Level level) {
-                string chapter = GetChapterName(level.Session);
-                string room = level.Session.Level;
-                LogAttempt(chapter, room, success: false);
-            }
-        }
+            if (!ModSettings.TrackingEnabled) return;
+            if (!(Engine.Scene is Level level)) return;
 
-        private void OnLevelComplete(Level level) {
-            string chapter = GetChapterName(level.Session);
+            string sid = GetSID(level.Session);
             string room = level.Session.Level;
-            LogAttempt(chapter, room, success: true);
+            RecordAttempt(sid, room, success: false);
         }
 
-        private static string GetChapterName(Session session) {
-        string sid = session.Area.SID ?? session.Area.ToString();
-        var mode = session.Area.Mode;
-        string suffix = mode == AreaMode.BSide ? "_B"
-                      : mode == AreaMode.CSide ? "_C"
-                      : "";
-        return sid + suffix;
+        private void OnRoomComplete(Level level) {
+            if (!ModSettings.TrackingEnabled) return;
+
+            string sid = GetSID(level.Session);
+            string room = level.Session.Level;
+            RecordAttempt(sid, room, success: true);
         }
 
-        private static void LogAttempt(string chapter, string room, bool success) {
-            if (_data == null) LoadData();
-
-            if (!_data.ContainsKey(chapter))
-                _data[chapter] = new Dictionary<string, List<bool>>();
-
-            if (!_data[chapter].ContainsKey(room))
-                _data[chapter][room] = new List<bool>();
-
-            _data[chapter][room].Add(success);
-            SaveData();
+        private void OnLevelEnter(Session session, bool fromSaveData) {
+            string sid = GetSID(session);
+            if (_currentSID != sid)
+                OnChapterChanged(sid);
         }
 
-        private static void LoadData() {
-          try {
-              _data = JsonConvert.DeserializeObject<Dictionary<string, Dictionary<string, List<bool>>>>(
-                  File.ReadAllText(LogFilePath));
-          } catch {
-              _data = new Dictionary<string, Dictionary<string, List<bool>>>();
-          }
+        private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
+            _renderer = null;
         }
 
-        private static void SaveData() {
-            try {
-                File.WriteAllText(LogFilePath, JsonConvert.SerializeObject(_data, Formatting.Indented));
-            } catch {
-                // silently fail
+        private void OnChapterChanged(string sid) {
+            _currentSID = sid;
+            ModSettings.CurrentSID = sid;
+            _attemptsSinceRefit.Clear();
+            HasTimingsForCurrentChapter = Timings.HasTimings(sid);
+
+            if (HasTimingsForCurrentChapter)
+                RefitAllModels();
+
+            Logger.Log(LogLevel.Info, "GoldenCompass",
+                $"Chapter changed to {sid}. Timings available: {HasTimingsForCurrentChapter}");
+        }
+
+        private void RecordAttempt(string sid, string room, bool success) {
+            Tracker.Record(sid, room, success);
+
+            if (!_attemptsSinceRefit.ContainsKey(room))
+                _attemptsSinceRefit[room] = 0;
+            _attemptsSinceRefit[room]++;
+
+            if (_attemptsSinceRefit[room] >= ModSettings.RefitInterval) {
+                _attemptsSinceRefit[room] = 0;
+                RefitAllModels();
+            }
+
+            // Ensure renderer is present whenever we record data
+            if (Engine.Scene is Level level)
+                EnsureRenderer(level);
+        }
+
+        private void RefitAllModels() {
+            if (_currentSID == null) return;
+
+            var chapterData = Tracker.GetChapterData(_currentSID);
+            var chapterTimings = Timings.GetChapterTimings(_currentSID);
+            if (chapterTimings == null) return;
+
+            var roomOrder = chapterTimings.Keys.ToList();
+            roomOrder.Sort(StringComparer.Ordinal);
+
+            var models = new Dictionary<string, RoomModel>();
+            foreach (string room in roomOrder) {
+                double time = chapterTimings[room];
+                List<bool> attempts = chapterData != null
+                    ? (Tracker.GetRoomData(_currentSID, room) ?? new List<bool>())
+                    : new List<bool>();
+                models[room] = ModelFitter.Fit(attempts, time, ModSettings.MinAttemptsForFit);
+            }
+
+            Advisor.UpdateModels(roomOrder, models);
+        }
+
+        private void EnsureRenderer(Level level) {
+            if (_renderer != null && _renderer.Scene == level) return;
+            _renderer = new GoldenCompassRenderer();
+            level.Add(_renderer);
+        }
+
+        private static string GetSID(Session session) {
+            string sid = session.Area.SID ?? session.Area.ToString();
+            var mode = session.Area.Mode;
+            string suffix = mode == AreaMode.BSide ? "_B"
+                          : mode == AreaMode.CSide ? "_C"
+                          : "";
+            return sid + suffix;
+        }
+
+        public override void CreateModMenuSection(TextMenu menu, bool inGame, FMOD.Studio.EventInstance snapshot) {
+            CreateModMenuSectionHeader(menu, inGame, snapshot);
+
+            if (inGame && _currentSID != null) {
+                var clearChapterItem = new TextMenu.Button("Clear Data: Current Chapter");
+                clearChapterItem.Pressed(() => {
+                    Tracker.ClearChapter(_currentSID);
+                    _attemptsSinceRefit.Clear();
+                    RefitAllModels();
+                    Logger.Log(LogLevel.Info, "GoldenCompass", $"Cleared data for {_currentSID}");
+                });
+                menu.Add(clearChapterItem);
+            }
+
+            var clearAllItem = new TextMenu.Button("Clear All Data");
+            clearAllItem.Pressed(() => {
+                Tracker.ClearAll();
+                _attemptsSinceRefit.Clear();
+                Advisor.UpdateModels(new List<string>(), new Dictionary<string, RoomModel>());
+                Logger.Log(LogLevel.Info, "GoldenCompass", "Cleared all data");
+            });
+            menu.Add(clearAllItem);
+
+            if (_currentSID != null && !HasTimingsForCurrentChapter) {
+                string path = TimingData.GetTimingFilePath(_currentSID);
+                var infoItem = new TextMenu.SubHeader($"Timing file needed: {path}");
+                menu.Add(infoItem);
             }
         }
     }
