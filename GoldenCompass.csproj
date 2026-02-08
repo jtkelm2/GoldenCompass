@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.2" />
-    <PackageReference Include="MathNet.Numerics" Version="4.15.0" />
+    <PackageReference Include="MathNet.Numerics" Version="4.15.0" PrivateAssets="none" ExcludeAssets="none" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,5 +27,6 @@
   <Target Name="CopyFiles" AfterTargets="Build">
     <Copy SourceFiles="$(OutputPath)\GoldenCompass.dll" DestinationFolder="bin" />
     <Copy SourceFiles="$(OutputPath)\GoldenCompass.pdb" DestinationFolder="bin" />
+    <Copy SourceFiles="$(OutputPath)\MathNet.Numerics.dll" DestinationFolder="bin" />
   </Target>
 </Project>
