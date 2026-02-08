@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Xna.Framework;
 using Monocle;
 
 namespace Celeste.Mod.GoldenCompass {
@@ -18,6 +19,8 @@ namespace Celeste.Mod.GoldenCompass {
 
         private Dictionary<string, int> _attemptsSinceRefit = new Dictionary<string, int>();
         private string _currentSID;
+        private string _currentRoomName;
+        private string _previousRoomName;
         private GoldenCompassRenderer _renderer;
 
         public GoldenCompassModule() {
@@ -30,14 +33,16 @@ namespace Celeste.Mod.GoldenCompass {
             Advisor = new SemiomniscientAdvisor();
 
             Everest.Events.Player.OnDie += OnPlayerDie;
-            Everest.Events.Level.OnComplete += OnRoomComplete;
+            Everest.Events.Level.OnTransitionTo += OnRoomTransition;
+            Everest.Events.Level.OnComplete += OnLevelComplete;
             Everest.Events.Level.OnEnter += OnLevelEnter;
             Everest.Events.Level.OnExit += OnLevelExit;
         }
 
         public override void Unload() {
             Everest.Events.Player.OnDie -= OnPlayerDie;
-            Everest.Events.Level.OnComplete -= OnRoomComplete;
+            Everest.Events.Level.OnTransitionTo -= OnRoomTransition;
+            Everest.Events.Level.OnComplete -= OnLevelComplete;
             Everest.Events.Level.OnEnter -= OnLevelEnter;
             Everest.Events.Level.OnExit -= OnLevelExit;
         }
@@ -51,18 +56,38 @@ namespace Celeste.Mod.GoldenCompass {
             RecordAttempt(sid, room, success: false);
         }
 
-        private void OnRoomComplete(Level level) {
+        private void OnRoomTransition(Level level, LevelData next, Vector2 direction) {
+            if (!ModSettings.TrackingEnabled) return;
+            if (next == null) return;
+
+            string sid = GetSID(level.Session);
+            string newRoomName = next.Name;
+
+            // Only record success if we are transitioning from one room into another non-current, non-previous room
+            if (_currentRoomName != null && newRoomName != _currentRoomName && newRoomName != _previousRoomName) {
+                RecordAttempt(sid, _currentRoomName, success: true);
+            }
+
+            _previousRoomName = _currentRoomName;
+            _currentRoomName = newRoomName;
+        }
+
+        private void OnLevelComplete(Level level) {
             if (!ModSettings.TrackingEnabled) return;
 
             string sid = GetSID(level.Session);
-            string room = level.Session.Level;
-            RecordAttempt(sid, room, success: true);
+            if (_currentRoomName != null) {
+                RecordAttempt(sid, _currentRoomName, success: true);
+            }
         }
 
         private void OnLevelEnter(Session session, bool fromSaveData) {
             string sid = GetSID(session);
             if (_currentSID != sid)
                 OnChapterChanged(sid);
+            
+            _currentRoomName = session.Level;
+            _previousRoomName = null;
         }
 
         private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
