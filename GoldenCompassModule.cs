@@ -164,7 +164,7 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         public override void CreateModMenuSection(TextMenu menu, bool inGame, FMOD.Studio.EventInstance snapshot) {
-            CreateModMenuSectionHeader(menu, inGame, snapshot);
+            base.CreateModMenuSection(menu, inGame, snapshot);
 
             if (inGame && _currentSID != null) {
                 var clearChapterItem = new TextMenu.Button("Clear Data: Current Chapter");
