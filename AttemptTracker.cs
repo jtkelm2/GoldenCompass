@@ -94,6 +94,15 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         /// <summary>
+        /// Ensure a chapter file exists on disk (creates an empty one if not).
+        /// Called when first entering a chapter.
+        /// </summary>
+        public void EnsureChapterFile(string sid) {
+            EnsureChapter(sid);
+            Save(sid);
+        }
+
+        /// <summary>
         /// Get the expected file path for a chapter's attempt file.
         /// </summary>
         public static string GetAttemptFilePath(string sid) {

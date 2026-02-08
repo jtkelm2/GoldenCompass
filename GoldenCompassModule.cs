@@ -88,6 +88,8 @@ namespace Celeste.Mod.GoldenCompass {
             
             _currentRoomName = session.Level;
             _previousRoomName = null;
+
+            Tracker.EnsureChapterFile(sid);
         }
 
         private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
