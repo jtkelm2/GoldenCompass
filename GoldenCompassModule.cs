@@ -36,6 +36,7 @@ namespace Celeste.Mod.GoldenCompass {
             Everest.Events.Level.OnTransitionTo += OnRoomTransition;
             Everest.Events.Level.OnComplete += OnLevelComplete;
             Everest.Events.Level.OnEnter += OnLevelEnter;
+            Everest.Events.Level.OnLoadLevel += OnLoadLevel;
             Everest.Events.Level.OnExit += OnLevelExit;
         }
 
@@ -44,6 +45,7 @@ namespace Celeste.Mod.GoldenCompass {
             Everest.Events.Level.OnTransitionTo -= OnRoomTransition;
             Everest.Events.Level.OnComplete -= OnLevelComplete;
             Everest.Events.Level.OnEnter -= OnLevelEnter;
+            Everest.Events.Level.OnLoadLevel -= OnLoadLevel;
             Everest.Events.Level.OnExit -= OnLevelExit;
         }
 
@@ -92,6 +94,10 @@ namespace Celeste.Mod.GoldenCompass {
             Tracker.EnsureChapterFile(sid);
         }
 
+        private void OnLoadLevel(Level level, Player.IntroTypes playerIntro, bool isFromLoader) {
+            EnsureRenderer(level);
+        }
+
         private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
             _renderer = null;
         }
@@ -120,10 +126,6 @@ namespace Celeste.Mod.GoldenCompass {
                 _attemptsSinceRefit[room] = 0;
                 RefitAllModels();
             }
-
-            // Ensure renderer is present whenever we record data
-            if (Engine.Scene is Level level)
-                EnsureRenderer(level);
         }
 
         private void RefitAllModels() {
