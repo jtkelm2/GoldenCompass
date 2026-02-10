@@ -1,5 +1,15 @@
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
+    /// Overlay detail levels.
+    /// </summary>
+    public enum OverlayMode {
+        Off,
+        Basic,
+        Extra,
+        All
+    }
+
+    /// <summary>
     /// Module settings exposed in Everest's mod options menu.
     /// </summary>
     public class GoldenCompassSettings : EverestModuleSettings {
@@ -9,9 +19,9 @@ namespace Celeste.Mod.GoldenCompass {
         public bool TrackingEnabled { get; set; } = true;
 
         /// <summary>
-        /// Whether the overlay is visible.
+        /// Overlay detail level: Off, Basic, Extra, or All.
         /// </summary>
-        public bool OverlayVisible { get; set; } = true;
+        public OverlayMode OverlayMode { get; set; } = OverlayMode.Basic;
 
         /// <summary>
         /// Minimum attempts before fitting a logistic model (vs constant probability).

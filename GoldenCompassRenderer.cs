@@ -5,7 +5,11 @@ using Monocle;
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
     /// Renders the GoldenCompass overlay in the top-right corner of the screen.
-    /// Shows: tracking status, recommendation, time estimates.
+    /// Detail level is controlled by OverlayMode setting:
+    ///   Off   - nothing rendered
+    ///   Basic - tracking status + recommendation (practice room or go for gold)
+    ///   Extra - adds time estimates, cost/benefit of current room, beta values for current room
+    ///   All   - same as Extra (reserved for future expansion)
     /// </summary>
     public class GoldenCompassRenderer : Entity {
         private const float Padding = 10f;
@@ -18,10 +22,10 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         public override void Render() {
-            if (!GoldenCompassModule.Instance.ModSettings.OverlayVisible)
+            var settings = GoldenCompassModule.Instance.ModSettings;
+            if (settings.OverlayMode == OverlayMode.Off)
                 return;
 
-            var settings = GoldenCompassModule.Instance.ModSettings;
             var advisor = GoldenCompassModule.Instance.Advisor;
             var rec = advisor?.HasModels == true ? advisor.GetRecommendation() : null;
             bool tracking = settings.TrackingEnabled;
@@ -30,6 +34,8 @@ namespace Celeste.Mod.GoldenCompass {
             float x = Engine.Width - Padding;
             float y = Padding;
             int line = 0;
+
+            // --- Always shown (Basic and above) ---
 
             // Tracking status
             string trackingText = tracking ? "TRACKING: ON" : "TRACKING: OFF";
@@ -63,20 +69,66 @@ namespace Celeste.Mod.GoldenCompass {
                 DrawRight($"Saves ~{advantage}/attempt", x, y + line * LineHeight, Color.Cyan * 0.8f);
             }
 
-            // Time estimates
-            line += 2;
-            DrawRight("Est. time remaining:", x, y + line * LineHeight, Color.White * 0.7f);
-            line++;
-            string naiveTime = FormatTime(rec.NaiveEstimateSeconds);
-            DrawRight($"  Naive grind: {naiveTime}", x, y + line * LineHeight, Color.OrangeRed * 0.9f);
-            line++;
-            string smartTime = FormatTime(rec.SmartEstimateSeconds);
-            DrawRight($"  Optimized:   {smartTime}", x, y + line * LineHeight, Color.LimeGreen * 0.9f);
-
-            // Confidence warning
-            if (rec.AnyLowConfidence) {
+            // --- Extra / All ---
+            if (settings.OverlayMode >= OverlayMode.Extra) {
+                // Time estimates
                 line += 2;
-                DrawRight("(low data - estimates rough)", x, y + line * LineHeight, Color.Yellow * 0.6f);
+                DrawRight("Est. time remaining:", x, y + line * LineHeight, Color.White * 0.7f);
+                line++;
+                string naiveTime = FormatTime(rec.NaiveEstimateSeconds);
+                DrawRight($"  Naive grind: {naiveTime}", x, y + line * LineHeight, Color.OrangeRed * 0.9f);
+                line++;
+                string smartTime = FormatTime(rec.SmartEstimateSeconds);
+                DrawRight($"  Optimized:   {smartTime}", x, y + line * LineHeight, Color.LimeGreen * 0.9f);
+
+                // Current room cost/benefit and model params
+                RenderCurrentRoomDetails(x, y, ref line);
+
+                // Confidence warning
+                if (rec.AnyLowConfidence) {
+                    line += 2;
+                    DrawRight("(low data - estimates rough)", x, y + line * LineHeight, Color.Yellow * 0.6f);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Show cost/benefit and beta values for the current room the player is in.
+        /// </summary>
+        private void RenderCurrentRoomDetails(float x, float y, ref int line) {
+            var module = GoldenCompassModule.Instance;
+            string currentRoom = module.CurrentRoomName;
+            if (currentRoom == null) return;
+
+            var advisor = module.Advisor;
+            if (advisor == null || !advisor.HasModels) return;
+
+            var roomModel = advisor.GetRoomModel(currentRoom);
+            if (roomModel == null) return;
+
+            line += 2;
+            DrawRight($"Current room: {currentRoom}", x, y + line * LineHeight, Color.White * 0.6f);
+            line++;
+
+            // Beta values
+            DrawRight($"  β₀={roomModel.Beta0:F3}  β₁={roomModel.Beta1:F4}", x, y + line * LineHeight, Color.White * 0.5f);
+            line++;
+
+            // Current success probability
+            double pNow = roomModel.SuccessProb(roomModel.AttemptCount);
+            DrawRight($"  P(success)={pNow:F2}  attempts={roomModel.AttemptCount}", x, y + line * LineHeight, Color.White * 0.5f);
+            line++;
+
+            // Cost/benefit of practicing this room
+            var detail = advisor.GetRoomPracticeBenefit(currentRoom);
+            if (detail != null) {
+                string benefitStr = FormatTime(detail.Value.Benefit);
+                string costStr = FormatTime(detail.Value.Cost);
+                string netStr = FormatTime(detail.Value.Net);
+                Color netColor = detail.Value.Net > 0 ? Color.LimeGreen * 0.7f : Color.OrangeRed * 0.7f;
+                DrawRight($"  Benefit: {benefitStr}  Cost: {costStr}", x, y + line * LineHeight, Color.White * 0.5f);
+                line++;
+                DrawRight($"  Net: {netStr}", x, y + line * LineHeight, netColor);
             }
         }
 
@@ -89,16 +141,17 @@ namespace Celeste.Mod.GoldenCompass {
             if (double.IsInfinity(seconds) || double.IsNaN(seconds) || seconds > 1e8)
                 return "???";
 
-            int totalSeconds = (int)seconds;
+            int totalSeconds = (int)Math.Abs(seconds);
             int hours = totalSeconds / 3600;
             int minutes = (totalSeconds % 3600) / 60;
             int secs = totalSeconds % 60;
+            string sign = seconds < 0 ? "-" : "";
 
             if (hours > 0)
-                return $"{hours}h {minutes}m";
+                return $"{sign}{hours}h {minutes}m";
             if (minutes > 0)
-                return $"{minutes}m {secs}s";
-            return $"{secs}s";
+                return $"{sign}{minutes}m {secs}s";
+            return $"{sign}{secs}s";
         }
     }
 }

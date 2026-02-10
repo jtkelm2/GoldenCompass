@@ -35,12 +35,25 @@ namespace Celeste.Mod.GoldenCompass {
     }
 
     /// <summary>
+    /// Benefit/cost breakdown for practicing a specific room.
+    /// </summary>
+    public struct RoomPracticeBenefit {
+        public double Benefit;
+        public double Cost;
+        public double Net;
+    }
+
+    /// <summary>
     /// Implements the semiomniscient strategy: recommends which room to practice
     /// or whether to go for the golden berry, based on fitted room models.
     /// </summary>
     public class SemiomniscientAdvisor {
         private List<string> _roomOrder;
         private Dictionary<string, RoomModel> _models;
+
+        // Cached from last GetRecommendation call
+        private Dictionary<string, double> _currentProbs;
+        private double _currentE0;
 
         public SemiomniscientAdvisor() {
             _roomOrder = new List<string>();
@@ -54,6 +67,8 @@ namespace Celeste.Mod.GoldenCompass {
         public void UpdateModels(List<string> roomOrder, Dictionary<string, RoomModel> models) {
             _roomOrder = new List<string>(roomOrder);
             _models = new Dictionary<string, RoomModel>(models);
+            _currentProbs = null;
+            _currentE0 = 0;
         }
 
         /// <summary>
@@ -62,17 +77,50 @@ namespace Celeste.Mod.GoldenCompass {
         public bool HasModels => _roomOrder.Count > 0 && _models.Count > 0;
 
         /// <summary>
+        /// Get the RoomModel for a specific room, or null if not found.
+        /// </summary>
+        public RoomModel GetRoomModel(string room) {
+            RoomModel model;
+            return _models.TryGetValue(room, out model) ? model : null;
+        }
+
+        /// <summary>
+        /// Get the cost/benefit breakdown for practicing a specific room.
+        /// Returns null if the room is not in the model set or no recommendation data is available.
+        /// </summary>
+        public RoomPracticeBenefit? GetRoomPracticeBenefit(string room) {
+            if (_currentProbs == null || !_models.ContainsKey(room) || !_currentProbs.ContainsKey(room))
+                return null;
+
+            var model = _models[room];
+            double pNew = model.SuccessProb(model.AttemptCount + 1);
+
+            var newProbs = new Dictionary<string, double>(_currentProbs);
+            newProbs[room] = pNew;
+            double newE0 = ComputeE0(newProbs);
+
+            double benefit = _currentE0 - newE0;
+            double cost = model.Time * (1.0 + _currentProbs[room]) / 2.0;
+
+            return new RoomPracticeBenefit {
+                Benefit = benefit,
+                Cost = cost,
+                Net = benefit - cost
+            };
+        }
+
+        /// <summary>
         /// Compute the current recommendation.
         /// </summary>
         public Recommendation GetRecommendation() {
             if (!HasModels) return null;
 
-            var currentProbs = new Dictionary<string, double>();
+            _currentProbs = new Dictionary<string, double>();
             foreach (string room in _roomOrder) {
-                currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
+                _currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
             }
 
-            double currentE0 = ComputeE0(currentProbs);
+            _currentE0 = ComputeE0(_currentProbs);
 
             // Find the room with the best net benefit from one more practice attempt
             string bestRoom = null;
@@ -82,12 +130,12 @@ namespace Celeste.Mod.GoldenCompass {
                 var model = _models[room];
                 double pNew = model.SuccessProb(model.AttemptCount + 1);
 
-                var newProbs = new Dictionary<string, double>(currentProbs);
+                var newProbs = new Dictionary<string, double>(_currentProbs);
                 newProbs[room] = pNew;
                 double newE0 = ComputeE0(newProbs);
 
-                double benefit = currentE0 - newE0;
-                double cost = model.Time * (1.0 + currentProbs[room]) / 2.0;
+                double benefit = _currentE0 - newE0;
+                double cost = model.Time * (1.0 + _currentProbs[room]) / 2.0;
                 double net = benefit - cost;
 
                 if (net > bestNet) {
@@ -96,7 +144,7 @@ namespace Celeste.Mod.GoldenCompass {
                 }
             }
 
-            double naiveEstimate = ComputeNaiveEstimate(currentProbs);
+            double naiveEstimate = ComputeNaiveEstimate(_currentProbs);
             bool anyLowConfidence = _models.Values.Any(m => m.LowConfidence);
 
             return new Recommendation {
@@ -104,7 +152,7 @@ namespace Celeste.Mod.GoldenCompass {
                 PracticeRoom = bestRoom,
                 NetBenefitSeconds = bestNet,
                 NaiveEstimateSeconds = naiveEstimate,
-                SmartEstimateSeconds = currentE0,
+                SmartEstimateSeconds = _currentE0,
                 AnyLowConfidence = anyLowConfidence
             };
         }

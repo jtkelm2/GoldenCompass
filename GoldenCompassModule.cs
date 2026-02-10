@@ -16,6 +16,7 @@ namespace Celeste.Mod.GoldenCompass {
         public SemiomniscientAdvisor Advisor { get; private set; }
 
         public bool HasTimingsForCurrentChapter { get; private set; }
+        public string CurrentRoomName => _currentRoomName;
 
         private Dictionary<string, int> _attemptsSinceRefit = new Dictionary<string, int>();
         private string _currentSID;
@@ -96,6 +97,12 @@ namespace Celeste.Mod.GoldenCompass {
 
         private void OnLoadLevel(Level level, Player.IntroTypes playerIntro, bool isFromLoader) {
             EnsureRenderer(level);
+
+            string actualRoom = level.Session.Level;
+            if (actualRoom != _currentRoomName) {
+                _previousRoomName = _currentRoomName;
+                _currentRoomName = actualRoom;
+            }
         }
 
         private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
@@ -103,6 +110,8 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         private void OnChapterChanged(string sid) {
+            Tracker.EnsureChapterFile(sid);
+
             _currentSID = sid;
             ModSettings.CurrentSID = sid;
             _attemptsSinceRefit.Clear();
