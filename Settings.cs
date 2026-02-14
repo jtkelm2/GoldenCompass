@@ -12,7 +12,7 @@ namespace Celeste.Mod.GoldenCompass {
     /// <summary>
     /// Module settings exposed in Everest's mod options menu.
     /// </summary>
-    public class GoldenCompassSettings : EverestModuleSettings {
+    public class Settings : EverestModuleSettings {
         /// <summary>
         /// Whether attempt tracking is currently enabled.
         /// </summary>
@@ -28,13 +28,6 @@ namespace Celeste.Mod.GoldenCompass {
         /// </summary>
         [SettingRange(5, 50)]
         public int MinAttemptsForFit { get; set; } = 15;
-
-        /// <summary>
-        /// How often to refit models, in attempts per room.
-        /// Lower = more responsive but slightly more CPU.
-        /// </summary>
-        [SettingRange(1, 20)]
-        public int RefitInterval { get; set; } = 5;
 
         // -- Actions (buttons in the settings menu) --
 

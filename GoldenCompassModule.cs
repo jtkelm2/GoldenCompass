@@ -6,32 +6,24 @@ using Monocle;
 
 namespace Celeste.Mod.GoldenCompass {
     public class GoldenCompassModule : EverestModule {
-        public static GoldenCompassModule Instance;
+        public static GoldenCompassModule Instance { get; private set; }
 
-        public override Type SettingsType => typeof(GoldenCompassSettings);
-        public GoldenCompassSettings ModSettings => (GoldenCompassSettings)_Settings;
+        public override Type SettingsType => typeof(Settings);
+        public Settings ModSettings => (Settings)_Settings;
 
-        public AttemptTracker Tracker { get; private set; }
-        public TimingData Timings { get; private set; }
-        public SemiomniscientAdvisor Advisor { get; private set; }
+        public Service Service { get; private set; }
 
-        public bool HasTimingsForCurrentChapter { get; private set; }
-        public string CurrentRoomName => _currentRoomName;
-
-        private Dictionary<string, int> _attemptsSinceRefit = new Dictionary<string, int>();
-        private string _currentSID;
-        private string _currentRoomName;
+        public string CurrentSID { get; private set; }
+        public string CurrentRoomName { get; private set; }
         private string _previousRoomName;
-        private GoldenCompassRenderer _renderer;
+        private Renderer _renderer;
 
         public GoldenCompassModule() {
             Instance = this;
         }
 
         public override void Load() {
-            Tracker = new AttemptTracker();
-            Timings = new TimingData();
-            Advisor = new SemiomniscientAdvisor();
+            Service = new Service();
 
             Everest.Events.Player.OnDie += OnPlayerDie;
             Everest.Events.Level.OnTransitionTo += OnRoomTransition;
@@ -56,7 +48,7 @@ namespace Celeste.Mod.GoldenCompass {
 
             string sid = GetSID(level.Session);
             string room = level.Session.Level;
-            RecordAttempt(sid, room, success: false);
+            Service.RecordAttempt(sid, room, success: false);
         }
 
         private void OnRoomTransition(Level level, LevelData next, Vector2 direction) {
@@ -67,41 +59,37 @@ namespace Celeste.Mod.GoldenCompass {
             string newRoomName = next.Name;
 
             // Only record success if we are transitioning from one room into another non-current, non-previous room
-            if (_currentRoomName != null && newRoomName != _currentRoomName && newRoomName != _previousRoomName) {
-                RecordAttempt(sid, _currentRoomName, success: true);
+            if (CurrentRoomName != null && newRoomName != CurrentRoomName && newRoomName != _previousRoomName) {
+                Service.RecordAttempt(sid, CurrentRoomName, success: true);
             }
 
-            _previousRoomName = _currentRoomName;
-            _currentRoomName = newRoomName;
+            _previousRoomName = CurrentRoomName;
+            CurrentRoomName = newRoomName;
         }
 
         private void OnLevelComplete(Level level) {
             if (!ModSettings.TrackingEnabled) return;
 
             string sid = GetSID(level.Session);
-            if (_currentRoomName != null) {
-                RecordAttempt(sid, _currentRoomName, success: true);
-            }
+            Service.RecordAttempt(sid, CurrentRoomName, success: true);
         }
 
         private void OnLevelEnter(Session session, bool fromSaveData) {
-            string sid = GetSID(session);
-            if (_currentSID != sid)
-                OnChapterChanged(sid);
-            
-            _currentRoomName = session.Level;
-            _previousRoomName = null;
+            CurrentSID = GetSID(session);
 
-            Tracker.EnsureChapterFile(sid);
+            Service.OnChapterChanged(CurrentSID);
+
+            CurrentRoomName = session.Level;
+            _previousRoomName = null;
         }
 
         private void OnLoadLevel(Level level, Player.IntroTypes playerIntro, bool isFromLoader) {
             EnsureRenderer(level);
 
             string actualRoom = level.Session.Level;
-            if (actualRoom != _currentRoomName) {
-                _previousRoomName = _currentRoomName;
-                _currentRoomName = actualRoom;
+            if (actualRoom != CurrentRoomName) {
+                _previousRoomName = null;
+                CurrentRoomName = actualRoom;
             }
         }
 
@@ -109,59 +97,9 @@ namespace Celeste.Mod.GoldenCompass {
             _renderer = null;
         }
 
-        private void OnChapterChanged(string sid) {
-            Tracker.EnsureChapterFile(sid);
-
-            _currentSID = sid;
-            ModSettings.CurrentSID = sid;
-            _attemptsSinceRefit.Clear();
-            HasTimingsForCurrentChapter = Timings.HasTimings(sid);
-
-            if (HasTimingsForCurrentChapter)
-                RefitAllModels();
-
-            Logger.Log(LogLevel.Info, "GoldenCompass",
-                $"Chapter changed to {sid}. Timings available: {HasTimingsForCurrentChapter}");
-        }
-
-        private void RecordAttempt(string sid, string room, bool success) {
-            Tracker.Record(sid, room, success);
-
-            if (!_attemptsSinceRefit.ContainsKey(room))
-                _attemptsSinceRefit[room] = 0;
-            _attemptsSinceRefit[room]++;
-
-            if (_attemptsSinceRefit[room] >= ModSettings.RefitInterval) {
-                _attemptsSinceRefit[room] = 0;
-                RefitAllModels();
-            }
-        }
-
-        private void RefitAllModels() {
-            if (_currentSID == null) return;
-
-            var chapterData = Tracker.GetChapterData(_currentSID);
-            var chapterTimings = Timings.GetChapterTimings(_currentSID);
-            if (chapterTimings == null) return;
-
-            var roomOrder = chapterTimings.Keys.ToList();
-            roomOrder.Sort(StringComparer.Ordinal);
-
-            var models = new Dictionary<string, RoomModel>();
-            foreach (string room in roomOrder) {
-                double time = chapterTimings[room];
-                List<bool> attempts = chapterData != null
-                    ? (Tracker.GetRoomData(_currentSID, room) ?? new List<bool>())
-                    : new List<bool>();
-                models[room] = ModelFitter.Fit(attempts, time, ModSettings.MinAttemptsForFit);
-            }
-
-            Advisor.UpdateModels(roomOrder, models);
-        }
-
         private void EnsureRenderer(Level level) {
             if (_renderer != null && _renderer.Scene == level) return;
-            _renderer = new GoldenCompassRenderer();
+            _renderer = new Renderer();
             level.Add(_renderer);
         }
 
@@ -177,28 +115,24 @@ namespace Celeste.Mod.GoldenCompass {
         public override void CreateModMenuSection(TextMenu menu, bool inGame, FMOD.Studio.EventInstance snapshot) {
             base.CreateModMenuSection(menu, inGame, snapshot);
 
-            if (inGame && _currentSID != null) {
+            if (inGame && CurrentSID != null) {
                 var clearChapterItem = new TextMenu.Button("Clear Data: Current Chapter");
                 clearChapterItem.Pressed(() => {
-                    Tracker.ClearChapter(_currentSID);
-                    _attemptsSinceRefit.Clear();
-                    RefitAllModels();
-                    Logger.Log(LogLevel.Info, "GoldenCompass", $"Cleared data for {_currentSID}");
+                    Service.ClearCurrentChapter();
+                    Logger.Log(LogLevel.Info, "GoldenCompass", $"Cleared data for {CurrentSID}");
                 });
                 menu.Add(clearChapterItem);
             }
 
             var clearAllItem = new TextMenu.Button("Clear All Data");
             clearAllItem.Pressed(() => {
-                Tracker.ClearAll();
-                _attemptsSinceRefit.Clear();
-                Advisor.UpdateModels(new List<string>(), new Dictionary<string, RoomModel>());
+                Service.ClearAllData();
                 Logger.Log(LogLevel.Info, "GoldenCompass", "Cleared all data");
             });
             menu.Add(clearAllItem);
 
-            if (_currentSID != null && !HasTimingsForCurrentChapter) {
-                string path = TimingData.GetTimingFilePath(_currentSID);
+            if (CurrentSID != null && !Service.HasTimingsForCurrentChapter) {
+                string path = TimingData.GetTimingFilePath(CurrentSID);
                 var infoItem = new TextMenu.SubHeader($"Timing file needed: {path}");
                 menu.Add(infoItem);
             }

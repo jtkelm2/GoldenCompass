@@ -2,27 +2,38 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
-    /// Loads per-room completion times from JSON files on disk.
+    /// Per-chapter timing data loaded from JSON files.
+    /// 
+    /// Stores both a room-to-time dictionary for lookups and a room order list
+    /// that preserves the key order from the JSON file, since Dictionary does
+    /// not guarantee insertion order on .NET 4.5.2.
     /// 
     /// Timing files are stored per chapter SID in:
-    ///   Mods/GoldenCompassData/timings/{sanitized_sid}.json
+    ///   {PathUtils.TimingsDir}/{sanitized_sid}.json
     ///
     /// Format: { "room_name": seconds, ... }
     /// </summary>
     public class TimingData {
-        private static readonly string TimingsDir = Path.Combine("Mods", "GoldenCompassData", "timings");
+        /// <summary>
+        /// Holds both the timing dictionary and the ordered room list for a chapter.
+        /// </summary>
+        public class ChapterTimings {
+            public List<string> RoomOrder { get; set; }
+            public Dictionary<string, double> Timings { get; set; }
+        }
 
-        // SID -> (room name -> seconds)
-        private Dictionary<string, Dictionary<string, double>> _cache
-            = new Dictionary<string, Dictionary<string, double>>();
+        // SID -> chapter timings (order + lookup)
+        private Dictionary<string, ChapterTimings> _cache
+            = new Dictionary<string, ChapterTimings>();
 
         /// <summary>
         /// Get timings for a chapter. Returns null if no timing file exists.
         /// </summary>
-        public Dictionary<string, double> GetChapterTimings(string sid) {
+        public ChapterTimings GetChapterTimings(string sid) {
             if (_cache.ContainsKey(sid))
                 return _cache[sid];
 
@@ -33,13 +44,13 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         /// <summary>
-        /// Get timing for a specific room. Returns fallback if unavailable.
+        /// Get timing for a specific room.
         /// </summary>
-        public double GetRoomTime(string sid, string room, double fallback = 10.0) {
-            var timings = GetChapterTimings(sid);
-            if (timings != null && timings.ContainsKey(room))
-                return timings[room];
-            return fallback;
+        public double? GetRoomTime(string sid, string room) {
+            var chapter = GetChapterTimings(sid);
+            if (chapter != null && chapter.Timings.ContainsKey(room))
+                return chapter.Timings[room];
+            return null;
         }
 
         /// <summary>
@@ -62,36 +73,39 @@ namespace Celeste.Mod.GoldenCompass {
         /// Useful for telling the user where to place the file.
         /// </summary>
         public static string GetTimingFilePath(string sid) {
-            string sanitized = SanitizeFileName(sid);
-            return Path.Combine(TimingsDir, sanitized + ".json");
+            string sanitized = PathUtils.SanitizeFileName(sid);
+            return Path.Combine(PathUtils.TimingsDir, sanitized + ".json");
         }
 
-        private Dictionary<string, double> LoadFromDisk(string sid) {
+        private ChapterTimings LoadFromDisk(string sid) {
             string path = GetTimingFilePath(sid);
+            Logger.Log(LogLevel.Warn, "GoldenCompass",
+                    $"Attempting Timing LoadFromDisk at {sid}");            
             try {
                 if (File.Exists(path)) {
                     string json = File.ReadAllText(path);
-                    return JsonConvert.DeserializeObject<Dictionary<string, double>>(json);
+                    var jObj = JObject.Parse(json);
+
+                    var roomOrder = new List<string>();
+                    var timings = new Dictionary<string, double>();
+
+                    foreach (var prop in jObj.Properties()) {
+                        string room = prop.Name;
+                        double time = prop.Value.Value<double>();
+                        roomOrder.Add(room);
+                        timings[room] = time;
+                    }
+
+                    return new ChapterTimings {
+                        RoomOrder = roomOrder,
+                        Timings = timings
+                    };
                 }
             } catch (Exception e) {
                 Logger.Log(LogLevel.Warn, "GoldenCompass",
                     $"Failed to load timings for {sid}: {e.Message}");
             }
             return null;
-        }
-
-        /// <summary>
-        /// Sanitize a SID for use as a filename.
-        /// Replaces path separators and other problematic characters.
-        /// </summary>
-        private static string SanitizeFileName(string sid) {
-            char[] invalid = Path.GetInvalidFileNameChars();
-            string result = sid;
-            foreach (char c in invalid)
-                result = result.Replace(c, '_');
-            // Also replace forward slash which SIDs commonly contain
-            result = result.Replace('/', '_');
-            return result;
         }
     }
 }

@@ -8,12 +8,10 @@ namespace Celeste.Mod.GoldenCompass {
     /// <summary>
     /// Manages per-chapter, per-room attempt history.
     /// Each chapter's data is stored in a separate JSON file at:
-    ///   Mods/GoldenCompassData/attempts/{sanitized_sid}.json
+    ///   {PathUtils.AttemptsDir}/{sanitized_sid}.json
     /// Format: { "room_name": [true, false, ...], ... }
     /// </summary>
     public class AttemptTracker {
-        private static readonly string AttemptsDir = Path.Combine("Mods", "GoldenCompassData", "attempts");
-
         // SID -> (room name -> list of success/fail outcomes)
         private Dictionary<string, Dictionary<string, List<bool>>> _cache
             = new Dictionary<string, Dictionary<string, List<bool>>>();
@@ -77,8 +75,9 @@ namespace Celeste.Mod.GoldenCompass {
             _cache.Clear();
 
             try {
-                if (Directory.Exists(AttemptsDir)) {
-                    foreach (string file in Directory.GetFiles(AttemptsDir, "*.json"))
+                string dir = PathUtils.AttemptsDir;
+                if (Directory.Exists(dir)) {
+                    foreach (string file in Directory.GetFiles(dir, "*.json"))
                         File.Delete(file);
                 }
             } catch (Exception e) {
@@ -106,8 +105,8 @@ namespace Celeste.Mod.GoldenCompass {
         /// Get the expected file path for a chapter's attempt file.
         /// </summary>
         public static string GetAttemptFilePath(string sid) {
-            string sanitized = SanitizeFileName(sid);
-            return Path.Combine(AttemptsDir, sanitized + ".json");
+            string sanitized = PathUtils.SanitizeFileName(sid);
+            return Path.Combine(PathUtils.AttemptsDir, sanitized + ".json");
         }
 
         private Dictionary<string, List<bool>> EnsureChapter(string sid) {
@@ -133,28 +132,20 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         private void Save(string sid) {
-            if (!_cache.ContainsKey(sid)) return;
+            if (!_cache.ContainsKey(sid)) {
+              Logger.Log(LogLevel.Warn, "GoldenCompass", $"_cache does not contain key {sid}");
+              return;
+            }
 
             try {
-                if (!Directory.Exists(AttemptsDir))
-                    Directory.CreateDirectory(AttemptsDir);
+                string dir = PathUtils.AttemptsDir;
+                if (!Directory.Exists(dir))
+                    Directory.CreateDirectory(dir);
                 string path = GetAttemptFilePath(sid);
                 File.WriteAllText(path, JsonConvert.SerializeObject(_cache[sid], Formatting.Indented));
             } catch (Exception e) {
                 Logger.Log(LogLevel.Warn, "GoldenCompass", $"Failed to save attempt data for {sid}: {e.Message}");
             }
-        }
-
-        /// <summary>
-        /// Sanitize a SID for use as a filename.
-        /// </summary>
-        private static string SanitizeFileName(string sid) {
-            char[] invalid = Path.GetInvalidFileNameChars();
-            string result = sid;
-            foreach (char c in invalid)
-                result = result.Replace(c, '_');
-            result = result.Replace('/', '_');
-            return result;
         }
     }
 }

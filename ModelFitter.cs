@@ -52,8 +52,7 @@ namespace Celeste.Mod.GoldenCompass {
         /// </summary>
         /// <param name="attempts">List of success/failure outcomes.</param>
         /// <param name="time">Room completion time in seconds.</param>
-        /// <param name="minAttempts">Minimum attempts before fitting a logistic curve.</param>
-        public static RoomModel Fit(List<bool> attempts, double time, int minAttempts = 15) {
+        public static RoomModel Fit(List<bool> attempts, double time) {
             int n = attempts.Count;
 
             if (n == 0) {
@@ -70,7 +69,7 @@ namespace Celeste.Mod.GoldenCompass {
             successRate = Clamp(successRate, 0.01, 0.99);
 
             // Below threshold: use constant probability model
-            if (n < minAttempts) {
+            if (n < GoldenCompassModule.Instance.ModSettings.MinAttemptsForFit) {
                 return new RoomModel {
                     Beta0 = Math.Log(successRate / (1.0 - successRate)),
                     Beta1 = 0.0,

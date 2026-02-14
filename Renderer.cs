@@ -11,25 +11,29 @@ namespace Celeste.Mod.GoldenCompass {
     ///   Extra - adds time estimates, cost/benefit of current room, beta values for current room
     ///   All   - same as Extra (reserved for future expansion)
     /// </summary>
-    public class GoldenCompassRenderer : Entity {
+    public class Renderer : Entity {
         private const float Padding = 10f;
         private const float LineHeight = 28f;
         private const float Scale = 0.5f;
 
-        public GoldenCompassRenderer() {
+        public Renderer() {
             Tag = Tags.HUD | Tags.Global | Tags.PauseUpdate | Tags.TransitionUpdate;
             Depth = -10000;
         }
 
         public override void Render() {
-            var settings = GoldenCompassModule.Instance.ModSettings;
+            var module = GoldenCompassModule.Instance;
+            if (module == null) return;
+
+            var settings = module.ModSettings;
             if (settings.OverlayMode == OverlayMode.Off)
                 return;
 
-            var advisor = GoldenCompassModule.Instance.Advisor;
+            var service = module.Service;
+            var advisor = service.Advisor;
             var rec = advisor?.HasModels == true ? advisor.GetRecommendation() : null;
             bool tracking = settings.TrackingEnabled;
-            bool hasTimings = GoldenCompassModule.Instance.HasTimingsForCurrentChapter;
+            bool hasTimings = service.HasTimingsForCurrentChapter;
 
             float x = Engine.Width - Padding;
             float y = Padding;
@@ -48,7 +52,7 @@ namespace Celeste.Mod.GoldenCompass {
                 line++;
                 DrawRight("Place file at:", x, y + line * LineHeight, Color.DarkGray);
                 line++;
-                string path = TimingData.GetTimingFilePath(settings.CurrentSID ?? "?");
+                string path = TimingData.GetTimingFilePath(module.CurrentSID ?? "?");
                 DrawRight(path, x, y + line * LineHeight, Color.DarkGray);
                 return;
             }
@@ -97,10 +101,12 @@ namespace Celeste.Mod.GoldenCompass {
         /// </summary>
         private void RenderCurrentRoomDetails(float x, float y, ref int line) {
             var module = GoldenCompassModule.Instance;
+            if (module == null) return;
+
             string currentRoom = module.CurrentRoomName;
             if (currentRoom == null) return;
 
-            var advisor = module.Advisor;
+            var advisor = module.Service.Advisor;
             if (advisor == null || !advisor.HasModels) return;
 
             var roomModel = advisor.GetRoomModel(currentRoom);
