@@ -9,7 +9,7 @@ namespace Celeste.Mod.GoldenCompass {
     ///   Off   - nothing rendered
     ///   Basic - tracking status + recommendation (practice room or go for gold)
     ///   Extra - adds time estimates, cost/benefit of current room, beta values for current room
-    ///   All   - same as Extra (reserved for future expansion)
+    ///   Debug - same as Extra plus Fisher information matrix for current room
     /// </summary>
     public class Renderer : Entity {
         private const float Padding = 10f;
@@ -73,7 +73,16 @@ namespace Celeste.Mod.GoldenCompass {
                 DrawRight($"Saves ~{advantage}/attempt", x, y + line * LineHeight, Color.Cyan * 0.8f);
             }
 
-            // --- Extra / All ---
+            // Per-room low confidence warning for the recommended practice room
+            if (!rec.GoForGold && rec.PracticeRoom != null) {
+                var practiceModel = advisor.GetRoomModel(rec.PracticeRoom);
+                if (practiceModel != null && practiceModel.LowConfidence) {
+                    line++;
+                    DrawRight($"(low data for {rec.PracticeRoom})", x, y + line * LineHeight, Color.Yellow * 0.6f);
+                }
+            }
+
+            // --- Extra / Debug ---
             if (settings.OverlayMode >= OverlayMode.Extra) {
                 // Time estimates
                 line += 2;
@@ -87,12 +96,6 @@ namespace Celeste.Mod.GoldenCompass {
 
                 // Current room cost/benefit and model params
                 RenderCurrentRoomDetails(x, y, ref line);
-
-                // Confidence warning
-                if (rec.AnyLowConfidence) {
-                    line += 2;
-                    DrawRight("(low data - estimates rough)", x, y + line * LineHeight, Color.Yellow * 0.6f);
-                }
             }
         }
 
@@ -117,7 +120,7 @@ namespace Celeste.Mod.GoldenCompass {
             line++;
 
             // Beta values
-            DrawRight($"  β₀={roomModel.Beta0:F3}  β₁={roomModel.Beta1:F4}", x, y + line * LineHeight, Color.White * 0.5f);
+            DrawRight($"  b0={roomModel.Beta0:F3}  b1={roomModel.Beta1:F4}", x, y + line * LineHeight, Color.White * 0.5f);
             line++;
 
             // Current success probability
@@ -135,6 +138,12 @@ namespace Celeste.Mod.GoldenCompass {
                 DrawRight($"  Benefit: {benefitStr}  Cost: {costStr}", x, y + line * LineHeight, Color.White * 0.5f);
                 line++;
                 DrawRight($"  Net: {netStr}", x, y + line * LineHeight, netColor);
+            }
+
+            // Per-room low confidence warning for current room
+            if (roomModel.LowConfidence) {
+                line++;
+                DrawRight($"  (low confidence)", x, y + line * LineHeight, Color.Yellow * 0.6f);
             }
         }
 

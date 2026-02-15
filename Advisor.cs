@@ -29,9 +29,6 @@ namespace Celeste.Mod.GoldenCompass {
         /// This is the current E0 — expected time of a single golden attempt cycle.
         /// </summary>
         public double SmartEstimateSeconds { get; set; }
-
-        /// <summary>Whether any room models have low confidence.</summary>
-        public bool AnyLowConfidence { get; set; }
     }
 
     /// <summary>
@@ -145,15 +142,13 @@ namespace Celeste.Mod.GoldenCompass {
             }
 
             double naiveEstimate = ComputeNaiveEstimate(_currentProbs);
-            bool anyLowConfidence = _models.Values.Any(m => m.LowConfidence);
 
             return new Recommendation {
                 GoForGold = bestRoom == null,
                 PracticeRoom = bestRoom,
                 NetBenefitSeconds = bestNet,
                 NaiveEstimateSeconds = naiveEstimate,
-                SmartEstimateSeconds = _currentE0,
-                AnyLowConfidence = anyLowConfidence
+                SmartEstimateSeconds = _currentE0
             };
         }
 

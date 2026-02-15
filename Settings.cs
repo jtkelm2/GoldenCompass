@@ -6,7 +6,7 @@ namespace Celeste.Mod.GoldenCompass {
         Off,
         Basic,
         Extra,
-        All
+        Debug
     }
 
     /// <summary>
@@ -19,7 +19,7 @@ namespace Celeste.Mod.GoldenCompass {
         public bool TrackingEnabled { get; set; } = true;
 
         /// <summary>
-        /// Overlay detail level: Off, Basic, Extra, or All.
+        /// Overlay detail level: Off, Basic, Extra, or Debug.
         /// </summary>
         public OverlayMode OverlayMode { get; set; } = OverlayMode.Basic;
 

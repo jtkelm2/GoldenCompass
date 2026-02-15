@@ -158,11 +158,6 @@ namespace Celeste.Mod.GoldenCompass {
                 lowConfidence = true;
             }
 
-            // Confidence check via Fisher information
-            if (!lowConfidence) {
-                lowConfidence = ComputeLowConfidence(beta0, beta1, t, n);
-            }
-
             return new RoomModel {
                 Beta0 = beta0,
                 Beta1 = beta1,
@@ -170,34 +165,6 @@ namespace Celeste.Mod.GoldenCompass {
                 AttemptCount = n,
                 LowConfidence = lowConfidence
             };
-        }
-
-        /// <summary>
-        /// Check if SE(beta1) > |beta1| using the Fisher information matrix.
-        /// </summary>
-        private static bool ComputeLowConfidence(double beta0, double beta1, double[] t, int n) {
-            try {
-                double h00 = 0, h01 = 0, h11 = 0;
-                for (int i = 0; i < n; i++) {
-                    double eta = beta0 + beta1 * t[i];
-                    double p = StableSigmoid(eta);
-                    double w = p * (1.0 - p);
-                    h00 += w;
-                    h01 += w * t[i];
-                    h11 += w * t[i] * t[i];
-                }
-
-                double det = h00 * h11 - h01 * h01;
-                if (Math.Abs(det) < 1e-15) return true;
-
-                double varBeta1 = h00 / det;
-                if (varBeta1 < 0) return true;
-
-                double seBeta1 = Math.Sqrt(varBeta1);
-                return seBeta1 > Math.Abs(beta1);
-            } catch {
-                return true;
-            }
         }
 
         private static double StableSigmoid(double x) {
