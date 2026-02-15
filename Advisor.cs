@@ -21,12 +21,13 @@ namespace Celeste.Mod.GoldenCompass {
 
         /// <summary>
         /// Estimated time to completion via naive grinding (seconds).
+        /// Uses mean-field simulation with passive improvement only (no deliberate practice).
         /// </summary>
         public double NaiveEstimateSeconds { get; set; }
 
         /// <summary>
         /// Estimated time to completion via semiomniscient strategy (seconds).
-        /// This is the current E0 — expected time of a single golden attempt cycle.
+        /// Uses mean-field simulation with optimal practice between attempt rounds.
         /// </summary>
         public double SmartEstimateSeconds { get; set; }
     }
@@ -50,7 +51,6 @@ namespace Celeste.Mod.GoldenCompass {
 
         // Cached from last GetRecommendation call
         private Dictionary<string, double> _currentProbs;
-        private double _currentE0;
 
         public SemiomniscientAdvisor() {
             _roomOrder = new List<string>();
@@ -65,7 +65,6 @@ namespace Celeste.Mod.GoldenCompass {
             _roomOrder = new List<string>(roomOrder);
             _models = new Dictionary<string, RoomModel>(models);
             _currentProbs = null;
-            _currentE0 = 0;
         }
 
         /// <summary>
@@ -92,11 +91,13 @@ namespace Celeste.Mod.GoldenCompass {
             var model = _models[room];
             double pNew = model.SuccessProb(model.AttemptCount + 1);
 
+            var currentE0 = ComputeE0(_currentProbs);
+
             var newProbs = new Dictionary<string, double>(_currentProbs);
             newProbs[room] = pNew;
             double newE0 = ComputeE0(newProbs);
 
-            double benefit = _currentE0 - newE0;
+            double benefit = currentE0 - newE0;
             double cost = model.Time * (1.0 + _currentProbs[room]) / 2.0;
 
             return new RoomPracticeBenefit {
@@ -117,7 +118,7 @@ namespace Celeste.Mod.GoldenCompass {
                 _currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
             }
 
-            _currentE0 = ComputeE0(_currentProbs);
+            var currentE0 = ComputeE0(_currentProbs);
 
             // Find the room with the best net benefit from one more practice attempt
             string bestRoom = null;
@@ -131,7 +132,7 @@ namespace Celeste.Mod.GoldenCompass {
                 newProbs[room] = pNew;
                 double newE0 = ComputeE0(newProbs);
 
-                double benefit = _currentE0 - newE0;
+                double benefit = currentE0 - newE0;
                 double cost = model.Time * (1.0 + _currentProbs[room]) / 2.0;
                 double net = benefit - cost;
 
@@ -141,26 +142,141 @@ namespace Celeste.Mod.GoldenCompass {
                 }
             }
 
-            double naiveEstimate = ComputeNaiveEstimate(_currentProbs);
+            // Compute forward-looking estimates via mean-field simulation
+            double naiveEstimate = ComputeMeanFieldEstimate(withPractice: false);
+            double smartEstimate = ComputeMeanFieldEstimate(withPractice: true);
 
             return new Recommendation {
                 GoForGold = bestRoom == null,
                 PracticeRoom = bestRoom,
                 NetBenefitSeconds = bestNet,
                 NaiveEstimateSeconds = naiveEstimate,
-                SmartEstimateSeconds = _currentE0
+                SmartEstimateSeconds = smartEstimate
             };
         }
 
+        // ──────────────────────────────────────────────────────────────
+        //  Mean-field forward simulation
+        // ──────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Estimate total expected time to completion using a mean-field (fluid)
+        /// approximation. Replaces stochastic flip counts with their expected
+        /// trajectories, yielding a deterministic iteration.
+        ///
+        /// When withPractice = false, simulates naive grinding: the player
+        /// repeatedly attempts the golden run, with probabilities improving
+        /// passively from the attempt flips alone.
+        ///
+        /// When withPractice = true, simulates the semiomniscient strategy:
+        /// between each attempt round, the player practices the room with the
+        /// highest net marginal benefit until no room's benefit exceeds its cost.
+        /// </summary>
+        private double ComputeMeanFieldEstimate(bool withPractice) {
+            int n = _roomOrder.Count;
+            double[] times = new double[n];
+            double[] flipCounts = new double[n];
+
+            for (int i = 0; i < n; i++) {
+                times[i] = _models[_roomOrder[i]].Time;
+                flipCounts[i] = _models[_roomOrder[i]].AttemptCount;
+            }
+
+            double totalCost = 0.0;
+            double survival = 1.0;
+            const int maxRounds = 100000;
+            const double epsilon = 1e-12;
+            const int maxPracticePerRound = 1000;
+
+            double[] probs = new double[n];
+
+            for (int round = 0; round < maxRounds && survival > epsilon; round++) {
+                // Snapshot current probabilities
+                for (int i = 0; i < n; i++) {
+                    probs[i] = GetProb(i, flipCounts[i]);
+                }
+
+                // ── Practice phase (only at progress k=0) ──
+                if (withPractice) {
+                    for (int iter = 0; iter < maxPracticePerRound; iter++) {
+                        double e0 = ComputeE0(probs, times, n);
+
+                        int bestIdx = -1;
+                        double bestNet = 0.0;
+
+                        for (int i = 0; i < n; i++) {
+                            double pOld = probs[i];
+                            double pNew = GetProb(i, flipCounts[i] + 1);
+
+                            // Temporarily swap to compute new E0
+                            probs[i] = pNew;
+                            double newE0 = ComputeE0(probs, times, n);
+                            probs[i] = pOld; // restore
+
+                            double benefit = e0 - newE0;
+                            double cost = times[i] * (1.0 + pOld) / 2.0;
+                            double net = benefit - cost;
+
+                            if (net > bestNet) {
+                                bestNet = net;
+                                bestIdx = i;
+                            }
+                        }
+
+                        if (bestIdx < 0) break;
+
+                        // Commit the practice flip
+                        totalCost += survival * times[bestIdx] * (1.0 + probs[bestIdx]) / 2.0;
+                        flipCounts[bestIdx] += 1.0;
+                        probs[bestIdx] = GetProb(bestIdx, flipCounts[bestIdx]);
+                    }
+                }
+
+                // ── Attempt round ──
+
+                // Success probability: product of all p_i
+                double S = 1.0;
+                for (int i = 0; i < n; i++) S *= probs[i];
+
+                // Expected cost of one attempt round
+                double roundCost = 0.0;
+                double prodPrev = 1.0;
+                for (int i = 0; i < n; i++) {
+                    roundCost += times[i] * (1.0 + probs[i]) / 2.0 * prodPrev;
+                    prodPrev *= probs[i];
+                }
+
+                totalCost += survival * roundCost;
+
+                // Mean-field update: coin j is reached with prob prod_{m<j} p_m
+                prodPrev = 1.0;
+                for (int i = 0; i < n; i++) {
+                    flipCounts[i] += prodPrev;
+                    prodPrev *= probs[i];
+                }
+
+                survival *= (1.0 - S);
+            }
+
+            return totalCost;
+        }
+
+        private double GetProb(int roomIdx, double n) {
+            var model = _models[_roomOrder[roomIdx]];
+            return model.SuccessProb(n);
+        }
+
+        // ──────────────────────────────────────────────────────────────
+        //  E0 computation
+        // ──────────────────────────────────────────────────────────────
+
         /// <summary>
         /// Expected time to complete a full golden run given current probabilities.
-        /// 
-        /// E0 = (1/P) * sum_j [ a_j * prod_{k &lt; j} p_k ]
-        /// where P = product of all p_j, and a_j = t_j * (1 + p_j) / 2
-        /// 
-        /// This represents the expected time of one "cycle" of naive grinding
-        /// at the current skill level, divided by the probability of success,
-        /// giving the expected total time until completion.
+        ///
+        /// E0 = sum_j [ a_j / prod_{m=j..n} p_m ]
+        ///    = (1/P) * sum_j [ a_j * prod_{m &lt; j} p_m ]
+        ///
+        /// where a_j = t_j * (1 + p_j) / 2 is the expected time per visit to room j.
         /// </summary>
         private double ComputeE0(Dictionary<string, double> probs) {
             double P = 1.0;
@@ -183,12 +299,23 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         /// <summary>
-        /// Estimate time to completion via naive grinding.
-        /// This is simply E0 at the current skill level — the expected time
-        /// if the player just does full runs from now without further practice.
+        /// Array-based overload of ComputeE0 for use in the mean-field inner loop,
+        /// avoiding dictionary allocation.
         /// </summary>
-        private double ComputeNaiveEstimate(Dictionary<string, double> probs) {
-            return ComputeE0(probs);
+        private double ComputeE0(double[] probs, double[] times, int n) {
+            double P = 1.0;
+            for (int i = 0; i < n; i++) P *= probs[i];
+
+            if (P < 1e-15) return double.MaxValue;
+
+            double total = 0.0;
+            double prodPrev = 1.0;
+            for (int i = 0; i < n; i++) {
+                total += times[i] * (1.0 + probs[i]) / 2.0 * prodPrev;
+                prodPrev *= probs[i];
+            }
+
+            return total / P;
         }
     }
 }

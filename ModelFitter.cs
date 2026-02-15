@@ -20,7 +20,7 @@ namespace Celeste.Mod.GoldenCompass {
         /// <summary>
         /// Probability of success on the given attempt (0-indexed).
         /// </summary>
-        public double SuccessProb(int attempt) {
+        public double SuccessProb(double attempt) {
             return Sigmoid(Beta0 + Beta1 * attempt);
         }
 
