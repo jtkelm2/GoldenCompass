@@ -52,13 +52,14 @@ namespace Celeste.Mod.GoldenCompass {
         // Cached from last GetRecommendation call
         private Dictionary<string, double> _currentProbs;
 
-        // Cache the recommendation to avoid recalculating every frame
+        // Cache the recommendation and practice benefit to avoid recalculating every frame
         private Recommendation _cachedRecommendation;
+        private RoomPracticeBenefit? _cachedPracticeBenefit;
+        private String _cachedRoom;
 
         public SemiomniscientAdvisor() {
             _roomOrder = new List<string>();
             _models = new Dictionary<string, RoomModel>();
-            _cachedRecommendation = null; // Invalidate cache when models change
         }
 
         /// <summary>
@@ -68,7 +69,14 @@ namespace Celeste.Mod.GoldenCompass {
         public void UpdateModels(List<string> roomOrder, Dictionary<string, RoomModel> models) {
             _roomOrder = new List<string>(roomOrder);
             _models = new Dictionary<string, RoomModel>(models);
-            _currentProbs = null;
+
+            _currentProbs = new Dictionary<string, double>();
+            foreach (string room in _roomOrder) {
+              _currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
+            }
+
+            _cachedRecommendation = null;
+            _cachedPracticeBenefit = null;
         }
 
         /// <summary>
@@ -89,8 +97,20 @@ namespace Celeste.Mod.GoldenCompass {
         /// Returns null if the room is not in the model set or no recommendation data is available.
         /// </summary>
         public RoomPracticeBenefit? GetRoomPracticeBenefit(string room) {
-            if (_currentProbs == null || !_models.ContainsKey(room) || !_currentProbs.ContainsKey(room))
+            if (room == _cachedRoom && _cachedPracticeBenefit != null)
+              return _cachedPracticeBenefit;
+
+            if (_currentProbs == null || !_models.ContainsKey(room) || !_currentProbs.ContainsKey(room)) {
+                if (_currentProbs == null) {
+                  Logger.Log(LogLevel.Info, "GoldenCompass", "_currentProbs == null");
+                  return null;
+                }
+                if (!_models.ContainsKey(room))
+                  Logger.Log(LogLevel.Info, "GoldenCompass", $"!_models.ContainsKey({room})");
+                if (!_currentProbs.ContainsKey(room))
+                  Logger.Log(LogLevel.Info, "GoldenCompass", $"!_currentProbs.ContainsKey({room})");
                 return null;
+            }
 
             var model = _models[room];
             double pNew = model.SuccessProb(model.AttemptCount + 1);
@@ -104,11 +124,14 @@ namespace Celeste.Mod.GoldenCompass {
             double benefit = currentE0 - newE0;
             double cost = model.Time * (1.0 + _currentProbs[room]) / 2.0;
 
-            return new RoomPracticeBenefit {
+            _cachedRoom = room;
+            _cachedPracticeBenefit = new RoomPracticeBenefit {
                 Benefit = benefit,
                 Cost = cost,
                 Net = benefit - cost
             };
+
+            return _cachedPracticeBenefit;
         }
 
         /// <summary>
@@ -119,11 +142,6 @@ namespace Celeste.Mod.GoldenCompass {
 
             if (_cachedRecommendation != null)
                 return _cachedRecommendation;
-
-            _currentProbs = new Dictionary<string, double>();
-            foreach (string room in _roomOrder) {
-                _currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
-            }
 
             var currentE0 = ComputeE0(_currentProbs);
 

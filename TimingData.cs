@@ -96,6 +96,8 @@ namespace Celeste.Mod.GoldenCompass {
                         timings[room] = time;
                     }
 
+                    Logger.Log(LogLevel.Info, "GoldenCompass", $"roomOrder: {string.Join(", ", roomOrder)}");
+
                     return new ChapterTimings {
                         RoomOrder = roomOrder,
                         Timings = timings
