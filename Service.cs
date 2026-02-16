@@ -113,6 +113,32 @@ namespace Celeste.Mod.GoldenCompass {
             ClearModels();
         }
 
+        /// <summary>
+        /// Compute total time expended on the current chapter:
+        /// each success counts as full room time, each failure as half.
+        /// Returns null if no timing data is available.
+        /// </summary>
+        public double? GetTimeExpended() {
+            if (_currentSID == null || !HasTimingsForCurrentChapter) return null;
+
+            var chapterTimings = Timings.GetChapterTimings(_currentSID);
+            if (chapterTimings == null) return null;
+
+            var chapterData = Tracker.GetChapterData(_currentSID);
+            if (chapterData == null) return 0.0;
+
+            double total = 0.0;
+            foreach (var kvp in chapterData) {
+                string room = kvp.Key;
+                if (!chapterTimings.Timings.ContainsKey(room)) continue;
+                double time = chapterTimings.Timings[room];
+                foreach (bool success in kvp.Value) {
+                    total += success ? time : time / 2.0;
+                }
+            }
+            return total;
+        }
+
         private void ClearModels() {
             _roomOrder = new List<string>();
             _models = new Dictionary<string, RoomModel>();

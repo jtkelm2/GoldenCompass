@@ -31,6 +31,7 @@ namespace Celeste.Mod.GoldenCompass {
             Everest.Events.Level.OnEnter += OnLevelEnter;
             Everest.Events.Level.OnLoadLevel += OnLoadLevel;
             Everest.Events.Level.OnExit += OnLevelExit;
+            On.Celeste.Level.Update += OnLevelUpdate;
         }
 
         public override void Unload() {
@@ -40,6 +41,15 @@ namespace Celeste.Mod.GoldenCompass {
             Everest.Events.Level.OnEnter -= OnLevelEnter;
             Everest.Events.Level.OnLoadLevel -= OnLoadLevel;
             Everest.Events.Level.OnExit -= OnLevelExit;
+            On.Celeste.Level.Update -= OnLevelUpdate;
+        }
+
+        private void OnLevelUpdate(On.Celeste.Level.orig_Update orig, Level level) {
+            orig(level);
+
+            if (ModSettings.TeleportToRecommended != null && ModSettings.TeleportToRecommended.Pressed) {
+                TeleportToRecommendedRoom(level);
+            }
         }
 
         private void OnPlayerDie(Player player) {
@@ -95,6 +105,73 @@ namespace Celeste.Mod.GoldenCompass {
 
         private void OnLevelExit(Level level, LevelExit exit, LevelExit.Mode mode, Session session, HiresSnow snow) {
             _renderer = null;
+        }
+
+        /// <summary>
+        /// Teleport to the recommended practice room, or the first room if "Go for Gold".
+        /// </summary>
+        private void TeleportToRecommendedRoom(Level level) {
+            var advisor = Service?.Advisor;
+            if (advisor == null || !advisor.HasModels) return;
+
+            var rec = advisor.GetRecommendation();
+            if (rec == null) return;
+
+            string targetRoom;
+            if (rec.GoForGold) {
+                // Teleport to the first room in the chapter
+                var chapterTimings = Service.Timings.GetChapterTimings(CurrentSID);
+                if (chapterTimings == null || chapterTimings.RoomOrder.Count == 0) return;
+                targetRoom = chapterTimings.RoomOrder[0];
+            } else {
+                targetRoom = rec.PracticeRoom;
+            }
+
+            if (string.IsNullOrEmpty(targetRoom)) return;
+
+            // Don't teleport if already in the target room
+            if (level.Session.Level == targetRoom) return;
+
+            TeleportToRoom(level, targetRoom);
+        }
+
+        /// <summary>
+        /// Teleport the player to the specified room within the current chapter.
+        /// Sets the session level and respawn point, then triggers a level reload.
+        /// </summary>
+        private void TeleportToRoom(Level level, string roomName) {
+            try {
+                // Find the LevelData for the target room
+                LevelData targetLevelData = level.Session.MapData.Get(roomName);
+                if (targetLevelData == null) {
+                    Logger.Log(LogLevel.Warn, "GoldenCompass",
+                        $"Cannot teleport: room '{roomName}' not found in map data.");
+                    return;
+                }
+
+                // Set session to target room
+                level.Session.Level = roomName;
+
+                // Find a valid spawn point in the target room (top-left corner as reference)
+                Vector2 spawnPoint = level.GetSpawnPoint(new Vector2(
+                    targetLevelData.Bounds.Left,
+                    targetLevelData.Bounds.Top));
+                level.Session.RespawnPoint = spawnPoint;
+
+                // Update tracking state
+                _previousRoomName = null;
+                CurrentRoomName = roomName;
+
+                // Teleport by reloading the level at the new session state
+                // This mirrors how the debug map teleport works
+                Engine.Scene = new LevelLoader(level.Session, spawnPoint);
+
+                Logger.Log(LogLevel.Info, "GoldenCompass",
+                    $"Teleported to room: {roomName}");
+            } catch (Exception e) {
+                Logger.Log(LogLevel.Warn, "GoldenCompass",
+                    $"Failed to teleport to room '{roomName}': {e.Message}");
+            }
         }
 
         private void EnsureRenderer(Level level) {

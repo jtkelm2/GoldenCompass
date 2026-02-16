@@ -84,6 +84,14 @@ namespace Celeste.Mod.GoldenCompass {
                 string smartTime = FormatTime(rec.SmartEstimateSeconds);
                 DrawRight($"  Optimized:   {smartTime}", x, y + line * LineHeight, Color.LimeGreen * 0.9f);
 
+                // Time expended on current chapter
+                double? expended = service.GetTimeExpended();
+                if (expended != null) {
+                    line++;
+                    string expendedTime = FormatTime(expended.Value);
+                    DrawRight($"  Time spent:  {expendedTime}", x, y + line * LineHeight, Color.White * 0.4f);
+                }
+
                 // Current room cost/benefit and model params
                 RenderCurrentRoomDetails(x, y, ref line);
             }

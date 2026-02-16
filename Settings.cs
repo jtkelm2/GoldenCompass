@@ -1,3 +1,5 @@
+using Microsoft.Xna.Framework.Input;
+
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
     /// Overlay detail levels.
@@ -35,6 +37,13 @@ namespace Celeste.Mod.GoldenCompass {
         /// </summary>
         [SettingRange(5, 100)]
         public int NegativeBetaConfidenceThreshold { get; set; } = 80;
+
+        /// <summary>
+        /// Key binding to teleport to the recommended practice room.
+        /// When the recommendation is "Go for Gold", teleports to the first room instead.
+        /// </summary>
+        [DefaultButtonBinding(0, Keys.F8)]
+        public ButtonBinding TeleportToRecommended { get; set; }
 
         // -- Actions (buttons in the settings menu) --
 
