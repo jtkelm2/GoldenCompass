@@ -7,6 +7,29 @@ using MathNet.Numerics.Optimization.ObjectiveFunctions;
 
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
+    /// Describes the confidence level of a room's fitted model.
+    /// Values are ordered by severity: lower values = less confident.
+    /// This ordering is used by the advisor to prioritize practice recommendations.
+    /// </summary>
+    public enum ConfidenceLevel {
+        /// <summary>
+        /// Not enough attempts to fit a logistic model.
+        /// </summary>
+        InsufficientData = 0,
+
+        /// <summary>
+        /// Enough data exists, but the logistic fit yielded a negative learning rate
+        /// and the success rate is below the configured threshold.
+        /// </summary>
+        NegativeLearningRate = 1,
+
+        /// <summary>
+        /// The model is well-fitted and confident.
+        /// </summary>
+        Confident = 2
+    }
+
+    /// <summary>
     /// Parameters for a fitted logistic model on a single room.
     /// P(success | attempt n) = sigmoid(beta0 + beta1 * n)
     /// </summary>
@@ -15,7 +38,12 @@ namespace Celeste.Mod.GoldenCompass {
         public double Beta1 { get; set; }
         public double Time { get; set; }
         public int AttemptCount { get; set; }
-        public bool LowConfidence { get; set; }
+        public ConfidenceLevel Confidence { get; set; }
+
+        /// <summary>
+        /// Convenience property: true when the model is not fully confident.
+        /// </summary>
+        public bool LowConfidence => Confidence != ConfidenceLevel.Confident;
 
         /// <summary>
         /// Probability of success on the given attempt (0-indexed).
@@ -61,7 +89,7 @@ namespace Celeste.Mod.GoldenCompass {
                     Beta1 = 0.0,
                     Time = time,
                     AttemptCount = 0,
-                    LowConfidence = true
+                    Confidence = ConfidenceLevel.InsufficientData
                 };
             }
 
@@ -75,7 +103,7 @@ namespace Celeste.Mod.GoldenCompass {
                     Beta1 = 0.0,
                     Time = time,
                     AttemptCount = n,
-                    LowConfidence = true
+                    Confidence = ConfidenceLevel.InsufficientData
                 };
             }
 
@@ -126,26 +154,12 @@ namespace Celeste.Mod.GoldenCompass {
             var initialGuess = Vector<double>.Build.DenseOfArray(new[] { 0.0, 0.0 });
 
             double beta0, beta1;
-            bool lowConfidence = false;
+            ConfidenceLevel confidence = ConfidenceLevel.Confident;
 
-            try {
-                var solver = new BfgsMinimizer(1e-8, 1e-8, 1e-8, 1000);
-                var result = solver.FindMinimum(objectiveFunc, initialGuess);
-                beta0 = result.MinimizingPoint[0];
-                beta1 = result.MinimizingPoint[1];
-            } catch (Exception e) {
-                Logger.Log(LogLevel.Warn, "GoldenCompass",
-                    $"Logistic fit failed, using constant model: {e.Message}");
-                double sr = attempts.Count(a => a) / (double)n;
-                sr = Clamp(sr, 0.01, 0.99);
-                return new RoomModel {
-                    Beta0 = Math.Log(sr / (1.0 - sr)),
-                    Beta1 = 0.0,
-                    Time = time,
-                    AttemptCount = n,
-                    LowConfidence = true
-                };
-            }
+            var solver = new BfgsMinimizer(1e-8, 1e-8, 1e-8, 1000);
+            var result = solver.FindMinimum(objectiveFunc, initialGuess);
+            beta0 = result.MinimizingPoint[0];
+            beta1 = result.MinimizingPoint[1];
 
             // Negative learning rate: fall back to constant model
             if (beta1 < 0) {
@@ -155,7 +169,11 @@ namespace Celeste.Mod.GoldenCompass {
                 sr = Clamp(sr, 0.01, 0.99);
                 beta0 = Math.Log(sr / (1.0 - sr));
                 beta1 = 0.0;
-                lowConfidence = true;
+
+                double threshold = GoldenCompassModule.Instance.ModSettings.NegativeBetaConfidenceThreshold / 100.0;
+                confidence = sr < threshold
+                    ? ConfidenceLevel.NegativeLearningRate
+                    : ConfidenceLevel.Confident;
             }
 
             return new RoomModel {
@@ -163,7 +181,7 @@ namespace Celeste.Mod.GoldenCompass {
                 Beta1 = beta1,
                 Time = time,
                 AttemptCount = n,
-                LowConfidence = lowConfidence
+                Confidence = confidence
             };
         }
 

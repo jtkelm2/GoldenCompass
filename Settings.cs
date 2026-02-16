@@ -29,6 +29,13 @@ namespace Celeste.Mod.GoldenCompass {
         [SettingRange(5, 50)]
         public int MinAttemptsForFit { get; set; } = 15;
 
+        /// <summary>
+        /// When a room has enough data but a negative learning rate (flat model fallback),
+        /// it is marked low confidence only if its predicted success rate is below this %.
+        /// </summary>
+        [SettingRange(5, 100)]
+        public int NegativeBetaConfidenceThreshold { get; set; } = 80;
+
         // -- Actions (buttons in the settings menu) --
 
         /// <summary>

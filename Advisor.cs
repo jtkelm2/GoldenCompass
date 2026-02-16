@@ -14,20 +14,25 @@ namespace Celeste.Mod.GoldenCompass {
         public string PracticeRoom { get; set; }
 
         /// <summary>
+        /// The confidence level of the recommended room, indicating why it was
+        /// chosen. Null when GoForGold. Confident means selected by cost/benefit
+        /// optimization; lower values mean prioritized due to data quality.
+        /// </summary>
+        public ConfidenceLevel? PracticeRoomConfidence { get; set; }
+
+        /// <summary>
         /// Expected time saved per practice attempt on the recommended room (seconds).
-        /// Net benefit = benefit - cost. Only meaningful when not GoForGold.
+        /// Net benefit = benefit - cost. Only meaningful when PracticeRoomConfidence is Confident.
         /// </summary>
         public double NetBenefitSeconds { get; set; }
 
         /// <summary>
         /// Estimated time to completion via naive grinding (seconds).
-        /// Uses mean-field simulation with passive improvement only (no deliberate practice).
         /// </summary>
         public double NaiveEstimateSeconds { get; set; }
 
         /// <summary>
         /// Estimated time to completion via semiomniscient strategy (seconds).
-        /// Uses mean-field simulation with optimal practice between attempt rounds.
         /// </summary>
         public double SmartEstimateSeconds { get; set; }
     }
@@ -128,6 +133,15 @@ namespace Celeste.Mod.GoldenCompass {
 
         /// <summary>
         /// Compute the current recommendation.
+        ///
+        /// Priority order:
+        ///   1. Any room with InsufficientData confidence (needs more attempts)
+        ///   2. Any room with NegativeLearningRate confidence (struggling, no improvement)
+        ///   3. The room with the best marginal net benefit from one more practice attempt
+        ///   4. If no room has positive net benefit, recommend going for gold
+        ///
+        /// Within each priority tier, the room with the lowest current success
+        /// probability is chosen (most to gain from practice).
         /// </summary>
         public Recommendation GetRecommendation() {
             if (!HasModels) return null;
@@ -135,11 +149,20 @@ namespace Celeste.Mod.GoldenCompass {
             if (_cachedRecommendation != null)
                 return _cachedRecommendation;
 
+            // --- Priority tiers: check for rooms needing data ---
+            string priorityRoom = FindPriorityRoom(ConfidenceLevel.InsufficientData)
+                               ?? FindPriorityRoom(ConfidenceLevel.NegativeLearningRate);
+
+            if (priorityRoom != null) {
+                _cachedRecommendation = BuildRecommendation(priorityRoom, _models[priorityRoom].Confidence);
+                return _cachedRecommendation;
+            }
+
+            // --- Normal cost/benefit optimization ---
             var currentE0 = ComputeE0(_currentProbs);
 
-            // Find the room with the best net benefit from one more practice attempt
             string bestRoom = null;
-            double bestNet = 0.0; // threshold: must be positive to recommend practice
+            double bestNet = 0.0;
 
             foreach (string room in _roomOrder) {
                 var model = _models[room];
@@ -159,19 +182,45 @@ namespace Celeste.Mod.GoldenCompass {
                 }
             }
 
-            // Compute forward-looking estimates via mean-field simulation
-            double naiveEstimate = ComputeMeanFieldEstimate(withPractice: false);
-            double smartEstimate = ComputeMeanFieldEstimate(withPractice: true);
-
-            _cachedRecommendation = new Recommendation {
-                GoForGold = bestRoom == null,
-                PracticeRoom = bestRoom,
-                NetBenefitSeconds = bestNet,
-                NaiveEstimateSeconds = naiveEstimate,
-                SmartEstimateSeconds = smartEstimate
-            };
+            _cachedRecommendation = BuildRecommendation(bestRoom, bestRoom != null ? ConfidenceLevel.Confident : (ConfidenceLevel?)null);
+            _cachedRecommendation.NetBenefitSeconds = bestNet;
 
             return _cachedRecommendation;
+        }
+
+        /// <summary>
+        /// Find the room with the given confidence level that has the lowest
+        /// current success probability. Returns null if no rooms match.
+        /// </summary>
+        private string FindPriorityRoom(ConfidenceLevel level) {
+            string best = null;
+            double bestProb = double.MaxValue;
+
+            foreach (string room in _roomOrder) {
+                if (_models[room].Confidence != level) continue;
+
+                double p = _currentProbs[room];
+                if (p < bestProb) {
+                    bestProb = p;
+                    best = room;
+                }
+            }
+
+            return best;
+        }
+
+        /// <summary>
+        /// Build a recommendation, computing time estimates.
+        /// </summary>
+        private Recommendation BuildRecommendation(string room, ConfidenceLevel? confidence) {
+            return new Recommendation {
+                GoForGold = room == null,
+                PracticeRoom = room,
+                PracticeRoomConfidence = confidence,
+                NetBenefitSeconds = 0.0,
+                NaiveEstimateSeconds = ComputeMeanFieldEstimate(withPractice: false),
+                SmartEstimateSeconds = ComputeMeanFieldEstimate(withPractice: true)
+            };
         }
 
         // ──────────────────────────────────────────────────────────────

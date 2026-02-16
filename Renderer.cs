@@ -69,17 +69,7 @@ namespace Celeste.Mod.GoldenCompass {
             } else {
                 DrawRight($"Practice: Room {rec.PracticeRoom}", x, y + line * LineHeight, Color.Cyan);
                 line++;
-                string advantage = FormatTime(rec.NetBenefitSeconds);
-                DrawRight($"Saves ~{advantage}/attempt", x, y + line * LineHeight, Color.Cyan * 0.8f);
-            }
-
-            // Per-room low confidence warning for the recommended practice room
-            if (!rec.GoForGold && rec.PracticeRoom != null) {
-                var practiceModel = advisor.GetRoomModel(rec.PracticeRoom);
-                if (practiceModel != null && practiceModel.LowConfidence) {
-                    line++;
-                    DrawRight($"(low data for {rec.PracticeRoom})", x, y + line * LineHeight, Color.Yellow * 0.6f);
-                }
+                RenderPracticeReason(rec, x, y, ref line);
             }
 
             // --- Extra / Debug ---
@@ -96,6 +86,26 @@ namespace Celeste.Mod.GoldenCompass {
 
                 // Current room cost/benefit and model params
                 RenderCurrentRoomDetails(x, y, ref line);
+            }
+        }
+
+        /// <summary>
+        /// Render the reason line beneath a practice recommendation.
+        /// </summary>
+        private void RenderPracticeReason(Recommendation rec, float x, float y, ref int line) {
+            switch (rec.PracticeRoomConfidence) {
+                case ConfidenceLevel.InsufficientData:
+                    DrawRight("(needs more data)", x, y + line * LineHeight, Color.Yellow * 0.7f);
+                    break;
+
+                case ConfidenceLevel.NegativeLearningRate:
+                    DrawRight("(not improving - practice needed)", x, y + line * LineHeight, Color.Orange * 0.7f);
+                    break;
+
+                case ConfidenceLevel.Confident:
+                    string advantage = FormatTime(rec.NetBenefitSeconds);
+                    DrawRight($"Saves ~{advantage}/attempt", x, y + line * LineHeight, Color.Cyan * 0.8f);
+                    break;
             }
         }
 
@@ -140,10 +150,17 @@ namespace Celeste.Mod.GoldenCompass {
                 DrawRight($"  Net: {netStr}", x, y + line * LineHeight, netColor);
             }
 
-            // Per-room low confidence warning for current room
+            // Per-room confidence warning for current room
             if (roomModel.LowConfidence) {
                 line++;
-                DrawRight($"  (low confidence)", x, y + line * LineHeight, Color.Yellow * 0.6f);
+                switch (roomModel.Confidence) {
+                    case ConfidenceLevel.InsufficientData:
+                        DrawRight($"  (insufficient data for {currentRoom})", x, y + line * LineHeight, Color.Yellow * 0.6f);
+                        break;
+                    case ConfidenceLevel.NegativeLearningRate:
+                        DrawRight($"  (flat/declining performance in {currentRoom})", x, y + line * LineHeight, Color.Orange * 0.6f);
+                        break;
+                }
             }
         }
 
