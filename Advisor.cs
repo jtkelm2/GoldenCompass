@@ -52,9 +52,13 @@ namespace Celeste.Mod.GoldenCompass {
         // Cached from last GetRecommendation call
         private Dictionary<string, double> _currentProbs;
 
+        // Cache the recommendation to avoid recalculating every frame
+        private Recommendation _cachedRecommendation;
+
         public SemiomniscientAdvisor() {
             _roomOrder = new List<string>();
             _models = new Dictionary<string, RoomModel>();
+            _cachedRecommendation = null; // Invalidate cache when models change
         }
 
         /// <summary>
@@ -113,6 +117,9 @@ namespace Celeste.Mod.GoldenCompass {
         public Recommendation GetRecommendation() {
             if (!HasModels) return null;
 
+            if (_cachedRecommendation != null)
+                return _cachedRecommendation;
+
             _currentProbs = new Dictionary<string, double>();
             foreach (string room in _roomOrder) {
                 _currentProbs[room] = _models[room].SuccessProb(_models[room].AttemptCount);
@@ -146,13 +153,15 @@ namespace Celeste.Mod.GoldenCompass {
             double naiveEstimate = ComputeMeanFieldEstimate(withPractice: false);
             double smartEstimate = ComputeMeanFieldEstimate(withPractice: true);
 
-            return new Recommendation {
+            _cachedRecommendation = new Recommendation {
                 GoForGold = bestRoom == null,
                 PracticeRoom = bestRoom,
                 NetBenefitSeconds = bestNet,
                 NaiveEstimateSeconds = naiveEstimate,
                 SmartEstimateSeconds = smartEstimate
             };
+
+            return _cachedRecommendation;
         }
 
         // ──────────────────────────────────────────────────────────────
