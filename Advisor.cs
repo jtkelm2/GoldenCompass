@@ -49,7 +49,7 @@ namespace Celeste.Mod.GoldenCompass {
         private List<string> _roomOrder;
         private Dictionary<string, RoomModel> _models;
 
-        // Cached from last GetRecommendation call
+        // Cached from last UpdateModels call
         private Dictionary<string, double> _currentProbs;
 
         // Cache the recommendation and practice benefit to avoid recalculating every frame
@@ -101,15 +101,7 @@ namespace Celeste.Mod.GoldenCompass {
               return _cachedPracticeBenefit;
 
             if (_currentProbs == null || !_models.ContainsKey(room) || !_currentProbs.ContainsKey(room)) {
-                if (_currentProbs == null) {
-                  Logger.Log(LogLevel.Info, "GoldenCompass", "_currentProbs == null");
-                  return null;
-                }
-                if (!_models.ContainsKey(room))
-                  Logger.Log(LogLevel.Info, "GoldenCompass", $"!_models.ContainsKey({room})");
-                if (!_currentProbs.ContainsKey(room))
-                  Logger.Log(LogLevel.Info, "GoldenCompass", $"!_currentProbs.ContainsKey({room})");
-                return null;
+                throw new Exception($"_currentProbs == null || !_models.ContainsKey({room}) || !_currentProbs.ContainsKey({room})");
             }
 
             var model = _models[room];
