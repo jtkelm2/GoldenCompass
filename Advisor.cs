@@ -62,6 +62,17 @@ namespace Celeste.Mod.GoldenCompass {
         private RoomPracticeBenefit? _cachedPracticeBenefit;
         private String _cachedRoom;
 
+        // Previous recommendation state for change detection
+        private string _prevRecommendedRoom;
+        private bool? _prevGoForGold;
+
+        /// <summary>
+        /// Fired when GetRecommendation() produces a result that differs from
+        /// the previous one (different practice room, or GoForGold changed).
+        /// Not fired for the very first recommendation after a chapter change.
+        /// </summary>
+        public event Action<Recommendation> OnRecommendationChanged;
+
         public SemiomniscientAdvisor() {
             _roomOrder = new List<string>();
             _models = new Dictionary<string, RoomModel>();
@@ -82,6 +93,15 @@ namespace Celeste.Mod.GoldenCompass {
 
             _cachedRecommendation = null;
             _cachedPracticeBenefit = null;
+        }
+
+        /// <summary>
+        /// Reset recommendation change tracking. Call when entering a new chapter
+        /// so the first recommendation does not trigger a change alert.
+        /// </summary>
+        public void ResetChangeTracking() {
+            _prevRecommendedRoom = null;
+            _prevGoForGold = null;
         }
 
         /// <summary>
@@ -155,6 +175,7 @@ namespace Celeste.Mod.GoldenCompass {
 
             if (priorityRoom != null) {
                 _cachedRecommendation = BuildRecommendation(priorityRoom, _models[priorityRoom].Confidence);
+                NotifyIfChanged(_cachedRecommendation);
                 return _cachedRecommendation;
             }
 
@@ -185,7 +206,28 @@ namespace Celeste.Mod.GoldenCompass {
             _cachedRecommendation = BuildRecommendation(bestRoom, bestRoom != null ? ConfidenceLevel.Confident : (ConfidenceLevel?)null);
             _cachedRecommendation.NetBenefitSeconds = bestNet;
 
+            NotifyIfChanged(_cachedRecommendation);
             return _cachedRecommendation;
+        }
+
+        /// <summary>
+        /// Compare the new recommendation against the previous one and fire
+        /// OnRecommendationChanged if it differs. Silently initializes on the
+        /// first recommendation (when _prevGoForGold is null).
+        /// </summary>
+        private void NotifyIfChanged(Recommendation rec) {
+            bool isFirst = _prevGoForGold == null;
+
+            bool changed = !isFirst &&
+                (rec.GoForGold != _prevGoForGold ||
+                 (!rec.GoForGold && rec.PracticeRoom != _prevRecommendedRoom));
+
+            _prevGoForGold = rec.GoForGold;
+            _prevRecommendedRoom = rec.PracticeRoom;
+
+            if (changed) {
+                OnRecommendationChanged?.Invoke(rec);
+            }
         }
 
         /// <summary>

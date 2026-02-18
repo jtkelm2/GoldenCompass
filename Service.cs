@@ -27,6 +27,8 @@ namespace Celeste.Mod.GoldenCompass {
             Advisor = new SemiomniscientAdvisor();
             _roomOrder = new List<string>();
             _models = new Dictionary<string, RoomModel>();
+
+            Advisor.OnRecommendationChanged += OnRecommendationChanged;
         }
 
         /// <summary>
@@ -40,6 +42,8 @@ namespace Celeste.Mod.GoldenCompass {
             HasTimingsForCurrentChapter = Timings.HasTimings(sid);
 
             Tracker.EnsureChapterFile(sid);
+
+            Advisor.ResetChangeTracking();
 
             if (HasTimingsForCurrentChapter)
                 RebuildAllModels();
@@ -137,6 +141,17 @@ namespace Celeste.Mod.GoldenCompass {
                 }
             }
             return total;
+        }
+
+        private void OnRecommendationChanged(Recommendation rec) {
+            if (!GoldenCompassModule.Instance.ModSettings.AlertOnRecommendationChange) return;
+
+            try {
+                Audio.Play("event:/ui/main/message_confirm").setVolume(2.0f);
+            } catch (Exception e) {
+                Logger.Log(LogLevel.Warn, "GoldenCompass",
+                    $"Failed to play recommendation change alert: {e.Message}");
+            }
         }
 
         private void ClearModels() {

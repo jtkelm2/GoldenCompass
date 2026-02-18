@@ -39,6 +39,11 @@ namespace Celeste.Mod.GoldenCompass {
         public int NegativeBetaConfidenceThreshold { get; set; } = 80;
 
         /// <summary>
+        /// Play an alert sound when the recommended practice room changes.
+        /// </summary>
+        public bool AlertOnRecommendationChange { get; set; } = false;
+
+        /// <summary>
         /// Key binding to teleport to the recommended practice room.
         /// When the recommendation is "Go for Gold", teleports to the first room instead.
         /// </summary>
