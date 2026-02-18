@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
@@ -9,24 +10,45 @@ namespace Celeste.Mod.GoldenCompass {
     /// 
     /// Keeps the module thin: the module handles Everest events and delegates
     /// all data/model logic here.
+    ///
+    /// Model fitting and advisor updates run on a background thread at
+    /// BelowNormal priority to avoid frame hitches. A generation counter
+    /// ensures only the latest refit is applied; intermediate results from
+    /// stale dispatches are discarded.
     /// </summary>
     public class Service {
         public AttemptTracker Tracker { get; private set; }
         public TimingData Timings { get; private set; }
-        public SemiomniscientAdvisor Advisor { get; private set; }
+
+        /// <summary>
+        /// The current advisor. Volatile so the main thread always sees
+        /// the latest reference after a background swap.
+        /// </summary>
+        private volatile SemiomniscientAdvisor _advisor;
+        public SemiomniscientAdvisor Advisor => _advisor;
+
+        /// <summary>
+        /// True while a background refit is in progress. Checked by the
+        /// renderer to display a visual indicator.
+        /// </summary>
+        private volatile bool _isRefitting;
+        public bool IsRefitting => _isRefitting;
 
         public bool HasTimingsForCurrentChapter { get; private set; }
 
         private string _currentSID;
-        private List<string> _roomOrder;
-        private Dictionary<string, RoomModel> _models;
+
+        /// <summary>
+        /// Monotonically increasing generation counter. Incremented each time
+        /// a refit is dispatched; the background thread checks on completion
+        /// whether its generation is still current before swapping in results.
+        /// </summary>
+        private int _generation;
 
         public Service() {
             Tracker = new AttemptTracker();
             Timings = new TimingData();
-            Advisor = new SemiomniscientAdvisor();
-            _roomOrder = new List<string>();
-            _models = new Dictionary<string, RoomModel>();
+            _advisor = new SemiomniscientAdvisor();
         }
 
         /// <summary>
@@ -42,7 +64,7 @@ namespace Celeste.Mod.GoldenCompass {
             Tracker.EnsureChapterFile(sid);
 
             if (HasTimingsForCurrentChapter)
-                RebuildAllModels();
+                DispatchRebuildAllModels();
             else
                 ClearModels();
 
@@ -51,8 +73,9 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         /// <summary>
-        /// Record an attempt and refit only the affected room's model,
-        /// then update the advisor.
+        /// Record an attempt and dispatch a background refit for the chapter.
+        /// The tracker write is synchronous (cheap); model fitting runs on a
+        /// background thread.
         /// </summary>
         public void RecordAttempt(string sid, string room, bool success) {
             Tracker.Record(sid, room, success);
@@ -60,19 +83,17 @@ namespace Celeste.Mod.GoldenCompass {
             if (!HasTimingsForCurrentChapter) return;
 
             var chapterTimings = Timings.GetChapterTimings(sid);
-            if (chapterTimings == null || !chapterTimings.Timings.ContainsKey(room)) return;
+            if (chapterTimings == null) return;
 
-            double time = chapterTimings.Timings[room];
-            List<bool> attempts = Tracker.GetRoomData(sid, room) ?? new List<bool>();
-            _models[room] = ModelFitter.Fit(attempts, time);
-
-            Advisor.UpdateModels(_roomOrder, _models);
+            DispatchRebuildAllModels();
         }
 
         /// <summary>
-        /// Rebuild all models from scratch. Used on chapter entry and after clearing data.
+        /// Dispatch a full model rebuild on a background thread.
+        /// Bumps the generation counter so any in-flight older rebuild
+        /// will discard its results.
         /// </summary>
-        public void RebuildAllModels() {
+        private void DispatchRebuildAllModels() {
             if (_currentSID == null) return;
 
             var chapterTimings = Timings.GetChapterTimings(_currentSID);
@@ -81,19 +102,72 @@ namespace Celeste.Mod.GoldenCompass {
                 return;
             }
 
-            _roomOrder = new List<string>(chapterTimings.RoomOrder);
-            _models = new Dictionary<string, RoomModel>();
+            // Snapshot all inputs for the background thread
+            var roomOrder = new List<string>(chapterTimings.RoomOrder);
             var chapterData = Tracker.GetChapterData(_currentSID);
 
-            foreach (string room in _roomOrder) {
-                double time = chapterTimings.Timings[room];
+            // Build a snapshot of attempt data (deep copy the lists)
+            var attemptSnapshot = new Dictionary<string, List<bool>>();
+            foreach (string room in roomOrder) {
                 List<bool> attempts = chapterData != null
                     ? (Tracker.GetRoomData(_currentSID, room) ?? new List<bool>())
                     : new List<bool>();
-                _models[room] = ModelFitter.Fit(attempts, time);
+                attemptSnapshot[room] = new List<bool>(attempts);
             }
 
-            Advisor.UpdateModels(_roomOrder, _models);
+            var timingsSnapshot = new Dictionary<string, double>(chapterTimings.Timings);
+
+            int gen = Interlocked.Increment(ref _generation);
+            _isRefitting = true;
+
+            var thread = new Thread(() => {
+                try {
+                    BackgroundRebuild(gen, roomOrder, timingsSnapshot, attemptSnapshot);
+                } catch (Exception e) {
+                    Logger.Log(LogLevel.Warn, "GoldenCompass",
+                        $"Background refit failed: {e.Message}");
+                }
+            });
+            thread.IsBackground = true;
+            thread.Priority = ThreadPriority.BelowNormal;
+            thread.Name = "GoldenCompass-Refit";
+            thread.Start();
+        }
+
+        /// <summary>
+        /// Runs on the background thread. Fits all room models, builds a new
+        /// advisor, pre-warms its recommendation, then atomically swaps it in
+        /// if the generation is still current.
+        /// </summary>
+        private void BackgroundRebuild(
+            int generation,
+            List<string> roomOrder,
+            Dictionary<string, double> timings,
+            Dictionary<string, List<bool>> attemptSnapshot)
+        {
+            // Fit models
+            var models = new Dictionary<string, RoomModel>();
+            foreach (string room in roomOrder) {
+                // Check if we've been superseded before each fit
+                if (generation != Volatile.Read(ref _generation)) return;
+
+                double time = timings[room];
+                List<bool> attempts = attemptSnapshot.ContainsKey(room)
+                    ? attemptSnapshot[room]
+                    : new List<bool>();
+                models[room] = ModelFitter.Fit(attempts, time);
+            }
+
+            // Build a fresh advisor and pre-warm the recommendation
+            var newAdvisor = new SemiomniscientAdvisor();
+            newAdvisor.UpdateModels(roomOrder, models);
+            newAdvisor.GetRecommendation(); // pre-warm cache
+
+            // Only swap in if we're still the latest generation
+            if (generation == Volatile.Read(ref _generation)) {
+                _advisor = newAdvisor;
+                _isRefitting = false;
+            }
         }
 
         /// <summary>
@@ -102,7 +176,7 @@ namespace Celeste.Mod.GoldenCompass {
         public void ClearCurrentChapter() {
             if (_currentSID == null) return;
             Tracker.ClearChapter(_currentSID);
-            RebuildAllModels();
+            DispatchRebuildAllModels();
         }
 
         /// <summary>
@@ -140,9 +214,13 @@ namespace Celeste.Mod.GoldenCompass {
         }
 
         private void ClearModels() {
-            _roomOrder = new List<string>();
-            _models = new Dictionary<string, RoomModel>();
-            Advisor.UpdateModels(_roomOrder, _models);
+            // Bump generation to cancel any in-flight refit
+            Interlocked.Increment(ref _generation);
+            _isRefitting = false;
+
+            var emptyAdvisor = new SemiomniscientAdvisor();
+            emptyAdvisor.UpdateModels(new List<string>(), new Dictionary<string, RoomModel>());
+            _advisor = emptyAdvisor;
         }
     }
 }

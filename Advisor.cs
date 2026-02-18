@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 
 namespace Celeste.Mod.GoldenCompass {
     /// <summary>
@@ -228,6 +229,14 @@ namespace Celeste.Mod.GoldenCompass {
         // ──────────────────────────────────────────────────────────────
 
         /// <summary>
+        /// How often to yield the thread's timeslice in the mean-field loop.
+        /// A Thread.Sleep(0) every N rounds lets the OS scheduler give time
+        /// back to the main thread if it's waiting, without measurably slowing
+        /// the computation when the main thread is idle.
+        /// </summary>
+        private const int YieldEveryNRounds = 1000;
+
+        /// <summary>
         /// Estimate total expected time to completion using a mean-field (fluid)
         /// approximation. Replaces stochastic flip counts with their expected
         /// trajectories, yielding a deterministic iteration.
@@ -259,6 +268,10 @@ namespace Celeste.Mod.GoldenCompass {
             double[] probs = new double[n];
 
             for (int round = 0; round < maxRounds && survival > epsilon; round++) {
+                // Yield timeslice periodically so the main thread isn't starved
+                if (round > 0 && round % YieldEveryNRounds == 0)
+                    Thread.Sleep(0);
+
                 // Snapshot current probabilities
                 for (int i = 0; i < n; i++) {
                     probs[i] = GetProb(i, flipCounts[i]);

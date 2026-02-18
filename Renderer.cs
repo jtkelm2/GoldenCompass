@@ -30,7 +30,11 @@ namespace Celeste.Mod.GoldenCompass {
                 return;
 
             var service = module.Service;
+
+            // Capture a single consistent advisor snapshot for this frame
             var advisor = service.Advisor;
+            bool isRefitting = service.IsRefitting;
+
             var rec = advisor?.HasModels == true ? advisor.GetRecommendation() : null;
             bool tracking = settings.TrackingEnabled;
             bool hasTimings = service.HasTimingsForCurrentChapter;
@@ -65,9 +69,13 @@ namespace Celeste.Mod.GoldenCompass {
             // Recommendation
             line++;
             if (rec.GoForGold) {
-                DrawRight(">> GO FOR GOLD <<", x, y + line * LineHeight, Color.Gold);
+                string goldText = ">> GO FOR GOLD <<";
+                if (isRefitting) goldText += "  (updating...)";
+                DrawRight(goldText, x, y + line * LineHeight, Color.Gold);
             } else {
-                DrawRight($"Practice: Room {rec.PracticeRoom}", x, y + line * LineHeight, Color.Cyan);
+                string practiceText = $"Practice: Room {rec.PracticeRoom}";
+                if (isRefitting) practiceText += "  (updating...)";
+                DrawRight(practiceText, x, y + line * LineHeight, Color.Cyan);
                 line++;
                 RenderPracticeReason(rec, x, y, ref line);
             }
@@ -93,7 +101,7 @@ namespace Celeste.Mod.GoldenCompass {
                 }
 
                 // Current room cost/benefit and model params
-                RenderCurrentRoomDetails(x, y, ref line);
+                RenderCurrentRoomDetails(advisor, x, y, ref line);
             }
         }
 
@@ -119,15 +127,15 @@ namespace Celeste.Mod.GoldenCompass {
 
         /// <summary>
         /// Show cost/benefit and beta values for the current room the player is in.
+        /// Uses the provided advisor snapshot for consistency within the frame.
         /// </summary>
-        private void RenderCurrentRoomDetails(float x, float y, ref int line) {
+        private void RenderCurrentRoomDetails(SemiomniscientAdvisor advisor, float x, float y, ref int line) {
             var module = GoldenCompassModule.Instance;
             if (module == null) return;
 
             string currentRoom = module.CurrentRoomName;
             if (currentRoom == null) return;
 
-            var advisor = module.Service.Advisor;
             if (advisor == null || !advisor.HasModels) return;
 
             var roomModel = advisor.GetRoomModel(currentRoom);
