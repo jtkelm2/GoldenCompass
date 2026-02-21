@@ -7,7 +7,7 @@ namespace Celeste.Mod.GoldenCompass {
     public enum OverlayMode {
         Off,
         Basic,
-        Extra,
+        Detailed,
         Debug
     }
 
