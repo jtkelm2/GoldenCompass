@@ -207,12 +207,6 @@ namespace Celeste.Mod.GoldenCompass {
                 Logger.Log(LogLevel.Info, "GoldenCompass", "Cleared all data");
             });
             menu.Add(clearAllItem);
-
-            if (CurrentSID != null && !Service.HasTimingsForCurrentChapter) {
-                string path = TimingData.GetTimingFilePath(CurrentSID);
-                var infoItem = new TextMenu.SubHeader($"Timing file needed: {path}");
-                menu.Add(infoItem);
-            }
         }
     }
 }
